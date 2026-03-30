@@ -128,7 +128,13 @@ export default function ProductionWorkflow({ order }: { order: any }) {
 
       <div className="space-y-4 no-print">
         {/* STAGE 1 */}
-        <StageCard title="Fabric Procurement" icon={<Truck size={20}/>} stage={stages[1]} expanded={expandedStage === 1} onToggle={() => setExpandedStage(1)}>
+       <StageCard 
+  title="Fabric Procurement" 
+  icon={<Truck size={20}/>} 
+  stage={stages[1]} 
+  expanded={expandedStage === 1} 
+  onToggle={() => setExpandedStage(expandedStage === 1 ? null : 1)}
+>
           <div className="space-y-6">
             {!stages[1].mode ? (
               <div className="flex gap-4">
@@ -161,7 +167,7 @@ export default function ProductionWorkflow({ order }: { order: any }) {
           { id: 3, name: 'Printing Stage', icon: <Printer size={20}/>, label: 'Print Technique' },
           { id: 4, name: 'Embroidery Stage', icon: <Scissors size={20}/>, label: 'Embroidery Work' },
         ].map(s => (
-          <StageCard key={s.id} title={s.name} icon={s.icon} stage={stages[s.id]} expanded={expandedStage === s.id} onToggle={() => !isLocked(s.id) && setExpandedStage(s.id)} locked={isLocked(s.id)}>
+          <StageCard key={s.id} title={s.name} icon={s.icon} stage={stages[s.id]} expanded={expandedStage === s.id} onToggle={() => !isLocked(s.id) && setExpandedStage(expandedStage === s.id ? null : s.id)} locked={isLocked(s.id)}>
               <div className="space-y-6">
                 <input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[s.id].assignedDays} onChange={(e) => handleStageUpdate(s.id, { assignedDays: Number(e.target.value) })}/>
                 {stages[s.id].status === 'pending' ? (
@@ -189,7 +195,14 @@ export default function ProductionWorkflow({ order }: { order: any }) {
         ))}
 
         {/* STAGE 5 */}
-        <StageCard title="Pattern & Sampling" icon={<Scissors size={20}/>} stage={stages[5]} expanded={expandedStage === 5} onToggle={() => !isLocked(5) && setExpandedStage(5)} locked={isLocked(5)}>
+        <StageCard 
+  title="Pattern & Sampling" 
+  icon={<Scissors size={20}/>} 
+  stage={stages[5]} 
+  expanded={expandedStage === 5} 
+  onToggle={() => !isLocked(5) && setExpandedStage(expandedStage === 5 ? null : 5)} 
+  locked={isLocked(5)}
+>
           <div className="space-y-6">
             <input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[5].assignedDays} onChange={(e) => handleStageUpdate(5, { assignedDays: Number(e.target.value) })}/>
             <table className="w-full text-left text-xs">
