@@ -17,6 +17,19 @@ export async function POST(request: Request) {
     const userId = body.message?.from?.id?.toString();
     if (userId !== ALLOWED_USER_ID) return NextResponse.json({ ok: true });
 
+    // --- ADD THIS: Reply to text messages like "Hi" ---
+    const text = body.message?.text;
+    if (text) {
+        await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+            chat_id: userId,
+            text: "Hello! I am alive. Please send me an Excel file to create an order."
+        });
+        return NextResponse.json({ ok: true });
+    }
+    // -------------------------------------------------
+
+    const document = body.message?.document;
+    // ... rest of code
     const document = body.message?.document;
     if (!document) return NextResponse.json({ ok: true });
 
