@@ -156,67 +156,73 @@ async function parseFormData(request: NextRequest) {
   return { client_id: parseInt(client_id), created_by, order_source, priority, notes, styles, files };
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const contentType = request.headers.get('content-type');
-    const supabaseAdmin = getSupabaseAdmin();
-    let orderData: CreateOrderRequest;
+    const supabase = await createClient();
+    const body = await request.json();
+    const { client_id, styles } = body;
 
-    if (contentType?.includes('multipart/form-data')) {
-      const parsedData = await parseFormData(request);
-      orderData = { 
-  ...parsedData, 
-  delivery_date: null, 
-  sample_type: null 
-} as CreateOrderRequest;
-    } else {
-      const body = await request.json();
-      const validation = validateCreateOrderRequest(body);
-      if (!validation.isValid) {
-        return NextResponse.json({ success: false, error: validation.errors.join(', ') }, { status: 400 });
-      }
-      orderData = validation.data!;
-    }
-
-    const { data: client, error: clientError } = await supabaseAdmin
+    // 1. VERIFY CLIENT EXISTS
+    // We check the 'clients' table using the ID passed from the frontend
+    const { data: client, error: clientError } = await supabase
       .from('clients')
       .select('id')
-      .eq('id', orderData.client_id)
-      .eq('is_deleted', false)
+      .eq('id', client_id)
       .single();
 
     if (clientError || !client) {
-      return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
+      console.error('Client Verification Error:', clientError);
+      return NextResponse.json({ 
+        success: false, 
+        error: `Client ID ${client_id} not found in database.` 
+      }, { status: 404 });
     }
 
-    const { data: newOrder, error: orderError } = await supabaseAdmin
+    // 2. CREATE THE MAIN ORDER
+    // Your main table is 'sample_orders' based on your Supabase screenshot
+    const { data: order, error: orderError } = await supabase
       .from('sample_orders')
-      .insert({
-        order_id: `SO-${Date.now()}`,
-        client_id: orderData.client_id,
+      .insert([{
+        client_id: client_id,
         status: 'draft',
-        created_by: orderData.created_by,
-        order_source: orderData.order_source,
-        priority: orderData.priority,
-        notes: orderData.notes,
-        is_order_created: true,
-      })
-      .select('id')
+        order_id: `ORD-${Math.floor(1000 + Math.random() * 9000)}`, // Generate a temp ID
+        priority: 'medium'
+      }])
+      .select()
       .single();
 
-    if (orderError) return NextResponse.json({ success: false, error: orderError.message }, { status: 500 });
-
-    const stylesWithOrderId = orderData.styles.map(style => ({ ...style, order_id: newOrder.id }));
-    const { error: stylesError } = await supabaseAdmin.from('order_styles').insert(stylesWithOrderId);
-
-    if (stylesError) {
-      await supabaseAdmin.from('sample_orders').delete().eq('id', newOrder.id);
-      return NextResponse.json({ success: false, error: 'Failed to create styles' }, { status: 500 });
+    if (orderError) {
+      console.error('Order Creation Error:', orderError);
+      throw orderError;
     }
 
-    return NextResponse.json({ success: true, id: newOrder.id, message: 'Created' }, { status: 201 });
-  } catch (error) {
-    return NextResponse.json({ success: false, error: 'Internal Error' }, { status: 500 });
+  // 3. CREATE THE STYLES LINKED TO THIS ORDER
+  if (styles && styles.length > 0) {
+    const stylesToInsert = styles.map((s: any) => ({
+      order_id: order.id, // Linking to the new order
+      style_name: s.style_name,
+      item_number: s.item_number,
+      fabric: s.fabric,
+      color_name: s.color_name,
+      quantity: s.quantity,
+      print_type: s.print_type || 'solid_dyed'
+    }));
+
+    const { error: stylesError } = await supabase
+      .from('order_styles')
+      .insert(stylesToInsert);
+
+    if (stylesError) {
+      console.error('Styles Insertion Error:', stylesError);
+      // Optional: you might want to delete the main order if styles fail
+    }
+  }
+
+    return NextResponse.json({ success: true, data: order });
+
+  } catch (err: any) {
+    console.error('Final API Error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
