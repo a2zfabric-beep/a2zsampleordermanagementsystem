@@ -23,13 +23,70 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    // 2. Handle Text Messages (like "Hi")
+    // 2. Handle Text Messages & Commands
     const text = body.message?.text;
     if (text) {
-      await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-        chat_id: userId,
-        text: "Hello! I am alive. Please send me an Excel file to create an order."
-      });
+      const isCommand = text.startsWith('/');
+      
+      // COMMAND: /stats - Quick Operations Summary
+      if (text === '/stats') {
+        const { data: orders } = await supabase.from('sample_orders').select('status');
+        const stats = orders?.reduce((acc: any, curr: any) => {
+          acc[curr.status] = (acc[curr.status] || 0) + 1;
+          return acc;
+        }, {});
+
+        const message = 
+          `📊 *Operations Summary*\n\n` +
+          `📝 Drafts: *${stats?.draft || 0}*\n` +
+          `📨 Submitted: *${stats?.submitted || 0}*\n` +
+          `🔬 Sampling: *${stats?.sampling_in_progress || 0}*\n` +
+          `📦 Ready: *${stats?.ready || 0}*\n` +
+          `🚚 Dispatched: *${stats?.dispatched || 0}*`;
+
+        await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+          chat_id: userId,
+          text: message,
+          parse_mode: 'Markdown'
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      // COMMAND: /delayed - Identify Bottlenecks
+      if (text === '/delayed') {
+        const { data: orders } = await supabase
+          .from('sample_orders')
+          .select('order_id, delivery_date, client:clients(name)')
+          .not('status', 'in', '("dispatched", "ready")');
+
+        const now = new Date();
+        const delayed = orders?.filter(o => o.delivery_date && new Date(o.delivery_date) < now) || [];
+
+        let message = `⚠️ *DELAYED ORDERS (${delayed.length})*\n\n`;
+        if (delayed.length === 0) {
+          message = "✅ *All orders are currently on track!*";
+        } else {
+          delayed.forEach(o => {
+            message += `• \`${o.order_id}\` | ${o.client?.name || 'Unknown'}\n   📅 Target: ${new Date(o.delivery_date).toLocaleDateString()}\n\n`;
+          });
+        }
+
+        await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+          chat_id: userId,
+          text: message,
+          parse_mode: 'Markdown'
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      // PRESERVE: Handle "Hi" or any other non-command text
+      if (!isCommand) {
+        await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+          chat_id: userId,
+          text: "👋 *Hello Admin!*\n\nI am ready for instructions. You can use the menu for /stats or send me an Excel template to create a new order.",
+          parse_mode: 'Markdown'
+        });
+      }
       return NextResponse.json({ ok: true });
     }
 
