@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   CheckCircle2, Lock, Truck, Palette, Printer, Scissors, 
-  ChevronDown, ChevronUp, Download, Timer, AlertCircle, XCircle, Check
+  ChevronDown, ChevronUp, Download, Timer, AlertCircle, XCircle, Check, RotateCcw
 } from 'lucide-react';
 
 export default function ProductionWorkflow({ order }: { order: any }) {
@@ -68,11 +68,7 @@ export default function ProductionWorkflow({ order }: { order: any }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ production_workflow: updatedStages }),
       });
-      
-      if (res.ok) {
-        // Optional: you can call a refresh function here if you passed one
-        console.log("Saved successfully");
-      }
+      if (res.ok) console.log("Saved successfully");
     } catch (err) {
       console.error("Save failed", err);
     } finally {
@@ -82,8 +78,6 @@ export default function ProductionWorkflow({ order }: { order: any }) {
 
   const handleStageUpdate = (id: number, updates: Partial<any>) => {
     const newStages = { ...stages, [id]: { ...stages[id], ...updates } };
-    
-    // Waterfall logic: Unlock next stage
     if (updates.status === 'completed' || updates.status === 'na') {
       const nextId = id + 1;
       if (nextId <= 5 && !newStages[nextId].startDate) {
@@ -91,6 +85,38 @@ export default function ProductionWorkflow({ order }: { order: any }) {
         setExpandedStage(nextId);
       }
     }
+    setStages(newStages);
+    saveWorkflow(newStages);
+  };
+
+  // --- NEW WATERFALL RESET LOGIC ---
+  const canReset = (id: number) => {
+    if (id === 5) return stages[5].status !== 'pending';
+    // Logic: Can only reset if the NEXT stage is still pending
+    const nextStage = stages[id + 1];
+    return nextStage.status === 'pending';
+  };
+
+  const handleReset = (id: number) => {
+    if (!canReset(id)) {
+      alert(`Cannot reset Stage ${id}. You must reset Stage ${id + 1} first to maintain the production timeline.`);
+      return;
+    }
+    
+    const newStages = { ...stages };
+    // Clear current stage
+    newStages[id] = {
+      ...newStages[id],
+      status: 'pending',
+      actualDate: null,
+      mode: id === 1 ? null : undefined // Mode only exists in Stage 1
+    };
+
+    // Clear the Start Date of the next stage since the dependency is reset
+    if (id < 5) {
+      newStages[id + 1] = { ...newStages[id + 1], startDate: null };
+    }
+
     setStages(newStages);
     saveWorkflow(newStages);
   };
@@ -128,13 +154,13 @@ export default function ProductionWorkflow({ order }: { order: any }) {
 
       <div className="space-y-4 no-print">
         {/* STAGE 1 */}
-       <StageCard 
-  title="Fabric Procurement" 
-  icon={<Truck size={20}/>} 
-  stage={stages[1]} 
-  expanded={expandedStage === 1} 
-  onToggle={() => setExpandedStage(expandedStage === 1 ? null : 1)}
->
+        <StageCard 
+          title="Fabric Procurement" 
+          icon={<Truck size={20}/>} 
+          stage={stages[1]} 
+          expanded={expandedStage === 1} 
+          onToggle={() => setExpandedStage(expandedStage === 1 ? null : 1)}
+        >
           <div className="space-y-6">
             {!stages[1].mode ? (
               <div className="flex gap-4">
@@ -153,7 +179,13 @@ export default function ProductionWorkflow({ order }: { order: any }) {
                   </tbody>
                 </table>
                 <div className="flex justify-between border-t pt-4">
-                    <button onClick={() => handleStageUpdate(1, { mode: null, status: 'pending' })} className="text-[10px] uppercase font-bold text-gray-400 underline">Reset</button>
+                    <button 
+                      onClick={() => handleReset(1)} 
+                      disabled={!canReset(1)}
+                      className={`flex items-center gap-2 text-[10px] uppercase font-bold underline ${!canReset(1) ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-500'}`}
+                    >
+                      <RotateCcw size={12}/> Reset Stage
+                    </button>
                     <button onClick={() => handleStageUpdate(1, { status: 'completed', actualDate: new Date().toISOString() })} className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px]">Complete Stage</button>
                 </div>
               </div>
@@ -169,7 +201,7 @@ export default function ProductionWorkflow({ order }: { order: any }) {
         ].map(s => (
           <StageCard key={s.id} title={s.name} icon={s.icon} stage={stages[s.id]} expanded={expandedStage === s.id} onToggle={() => !isLocked(s.id) && setExpandedStage(expandedStage === s.id ? null : s.id)} locked={isLocked(s.id)}>
               <div className="space-y-6">
-                <input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[s.id].assignedDays} onChange={(e) => handleStageUpdate(s.id, { assignedDays: Number(e.target.value) })}/>
+                <div className="flex items-end gap-4"><label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Budget Days</label><input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[s.id].assignedDays} onChange={(e) => handleStageUpdate(s.id, { assignedDays: Number(e.target.value) })}/></div>
                 {stages[s.id].status === 'pending' ? (
                   <div className="flex gap-4">
                     <button onClick={() => handleStageUpdate(s.id, { status: 'na' })} className="flex-1 py-5 border-2 text-gray-400 border-gray-100 rounded-2xl font-black uppercase text-xs">Not Required</button>
@@ -184,8 +216,17 @@ export default function ProductionWorkflow({ order }: { order: any }) {
                         <div><label className="text-gray-400 uppercase mb-1 block">Vendor</label><input className="w-full p-2 bg-gray-50 rounded border" value={config.vendor} onChange={e => {const c=[...stageConfigs[s.id]]; c[idx].vendor=e.target.value; setStageConfigs({...stageConfigs, [s.id]: c})}} /></div>
                       </div>
                     ))}
-                    <div className="flex justify-between pt-4">
-                        <button onClick={() => triggerPrint(s.id, s.name)} className="px-4 py-2 border border-blue-600 text-blue-600 rounded-lg font-black text-[10px] uppercase">Print Work Order</button>
+                    <div className="flex justify-between items-center pt-4">
+                        <div className="flex gap-4 items-center">
+                          <button onClick={() => triggerPrint(s.id, s.name)} className="px-4 py-2 border border-blue-600 text-blue-600 rounded-lg font-black text-[10px] uppercase">Work Order</button>
+                          <button 
+                            onClick={() => handleReset(s.id)} 
+                            disabled={!canReset(s.id)}
+                            className={`text-[10px] uppercase font-bold underline ${!canReset(s.id) ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-500'}`}
+                          >
+                            Reset
+                          </button>
+                        </div>
                         <button onClick={() => handleStageUpdate(s.id, { status: 'completed', actualDate: new Date().toISOString() })} className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px]">Complete</button>
                     </div>
                   </div>
@@ -196,13 +237,13 @@ export default function ProductionWorkflow({ order }: { order: any }) {
 
         {/* STAGE 5 */}
         <StageCard 
-  title="Pattern & Sampling" 
-  icon={<Scissors size={20}/>} 
-  stage={stages[5]} 
-  expanded={expandedStage === 5} 
-  onToggle={() => !isLocked(5) && setExpandedStage(expandedStage === 5 ? null : 5)} 
-  locked={isLocked(5)}
->
+          title="Pattern & Sampling" 
+          icon={<Scissors size={20}/>} 
+          stage={stages[5]} 
+          expanded={expandedStage === 5} 
+          onToggle={() => !isLocked(5) && setExpandedStage(expandedStage === 5 ? null : 5)} 
+          locked={isLocked(5)}
+        >
           <div className="space-y-6">
             <input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[5].assignedDays} onChange={(e) => handleStageUpdate(5, { assignedDays: Number(e.target.value) })}/>
             <table className="w-full text-left text-xs">
@@ -217,7 +258,15 @@ export default function ProductionWorkflow({ order }: { order: any }) {
                 ))}
                 </tbody>
             </table>
-            <button onClick={() => handleStageUpdate(5, { status: 'completed', actualDate: new Date().toISOString() })} className="w-full py-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-xs shadow-xl">Finish Order</button>
+            <div className="flex flex-col gap-3">
+              <button onClick={() => handleStageUpdate(5, { status: 'completed', actualDate: new Date().toISOString() })} className="w-full py-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-xs shadow-xl">Finish Order</button>
+              <button 
+                onClick={() => handleReset(5)} 
+                className="text-[10px] uppercase font-bold text-gray-400 underline text-center"
+              >
+                Reset Sampling Stage
+              </button>
+            </div>
           </div>
         </StageCard>
       </div>
@@ -226,7 +275,6 @@ export default function ProductionWorkflow({ order }: { order: any }) {
       <div className="hidden print:block p-10 bg-white">
           <h1 className="text-2xl font-black uppercase border-b-4 border-black mb-4">{activePrintStage?.title}</h1>
           <p className="font-bold">ORDER: #{order.order_id}</p>
-          {/* ... PDF Logic remains here ... */}
       </div>
     </div>
   );
@@ -244,7 +292,13 @@ function StageCard({ title, icon, stage, expanded, onToggle, locked = false, chi
         <div className="flex items-center gap-5">
           <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${locked ? 'bg-gray-200 text-gray-400' : isDelayed ? 'bg-red-500 text-white animate-pulse' : stage.status === 'completed' ? 'bg-emerald-500 text-white shadow-lg' : 'bg-blue-50 text-blue-600'}`}>{locked ? <Lock size={20}/> : isDelayed ? <AlertCircle size={24}/> : stage.status === 'completed' ? <CheckCircle2 size={24}/> : icon}</div>
           <div><h3 className={`text-base font-black uppercase tracking-widest ${locked ? 'text-gray-300' : 'text-gray-900'}`}>{title}</h3>
-            <div className="flex gap-4 mt-1 items-center"><span className={`text-[10px] font-black uppercase ${isDelayed ? 'text-red-600' : stage.status === 'completed' ? 'text-emerald-500' : 'text-blue-600'}`}>{stage.status}</span><div className="h-1 w-1 bg-gray-300 rounded-full"></div><span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Allocated: {stage.assignedDays}d • Used: {spent}d</span></div>
+            <div className="flex gap-4 mt-1 items-center">
+              <span className={`text-[10px] font-black uppercase ${stage.status === 'completed' ? 'text-emerald-500' : 'text-blue-600'}`}>
+                {stage.status === 'na' ? 'Not Required' : stage.status.replace('_', ' ')}
+              </span>
+              <div className="h-1 w-1 bg-gray-300 rounded-full"></div>
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Allocated: {stage.assignedDays}d • Used: {spent}d</span>
+            </div>
           </div>
         </div>
         {!locked && (expanded ? <ChevronUp size={24} className="text-blue-500"/> : <ChevronDown size={24} className="text-gray-300"/>)}
