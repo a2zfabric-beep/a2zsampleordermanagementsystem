@@ -58,9 +58,16 @@ export default function ProductionWorkflow({ order }: { order: any }) {
 
   if (!order) return <div className="p-10 text-center animate-pulse font-black text-gray-400 uppercase">Awaiting Data...</div>;
 
-  const totalBudgetDays = order.delivery_date 
-    ? Math.ceil((new Date(order.delivery_date).getTime() - new Date(order.created_at).getTime()) / (1000 * 3600 * 24)) 
-    : 0;
+  const totalBudgetDays = React.useMemo(() => {
+    if (!order.delivery_date || !order.created_at) return 0;
+    const start = new Date(order.created_at);
+    const end = new Date(order.delivery_date);
+    // Reset hours to compare full days
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    const diffTime = end.getTime() - start.getTime();
+    return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+  }, [order.delivery_date, order.created_at]);
 
   const handleStageUpdate = (id: number, updates: Partial<StageData>) => {
     if (updates.assignedDays !== undefined) {
@@ -283,23 +290,68 @@ export default function ProductionWorkflow({ order }: { order: any }) {
   );
 }
 
-function StageCard({ title, icon, stage, expanded, onToggle, locked = false, mandatory = false, children }: any) {
-  const startStr = stage.startDate?.split('T')[0];
-  const actualStr = stage.actualDate?.split('T')[0];
-  let spent = 0;
-  if (startStr && actualStr) spent = Math.max(0, Math.ceil((new Date(actualStr).getTime() - new Date(startStr).getTime()) / (1000 * 3600 * 24)));
-  else if (startStr && stage.status !== 'completed' && stage.status !== 'na') spent = Math.max(0, Math.ceil((new Date().getTime() - new Date(startStr).getTime()) / (1000 * 3600 * 24)));
-  const isDelayed = stage.status === 'completed' && spent > stage.assignedDays;
+function StageCard({ title, icon, stage, expanded, onToggle, locked = false, children }: any) {
+  const startStr = stage.startDate;
+  const actualStr = stage.actualDate;
+  
+  // Calculate days spent accurately
+  const spent = React.useMemo(() => {
+    if (!startStr) return 0;
+    const start = new Date(startStr);
+    const end = actualStr ? new Date(actualStr) : new Date();
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    return Math.max(0, Math.ceil((end.getTime() - start.getTime()) / (1000 * 3600 * 24)));
+  }, [startStr, actualStr]);
+
+  // Culprit logic: Is this specific stage causing the delay?
+  const isOverBudget = spent > stage.assignedDays && stage.assignedDays > 0;
+  const isDelayedCulprit = (stage.status === 'in_progress' || stage.status === 'completed') && isOverBudget;
+
   return (
-    <div className={`rounded-[2.5rem] border-2 transition-all duration-300 ${locked ? 'bg-gray-50 opacity-40 cursor-not-allowed border-transparent' : stage.status === 'completed' ? 'border-emerald-200 bg-white' : stage.status === 'na' ? 'border-gray-100 bg-gray-50/50' : expanded ? 'border-blue-500 shadow-xl bg-white scale-[1.01]' : 'border-gray-100 bg-white hover:border-gray-200'}`}>
+    <div className={`rounded-[2.5rem] border-2 transition-all duration-300 
+      ${locked ? 'bg-gray-50 opacity-40 cursor-not-allowed border-transparent' : 
+        isDelayedCulprit ? 'border-red-500 bg-red-50 shadow-lg scale-[1.01]' : 
+        stage.status === 'completed' ? 'border-emerald-200 bg-white' : 
+        stage.status === 'na' ? 'border-gray-100 bg-gray-50/50' : 
+        expanded ? 'border-blue-500 shadow-xl bg-white scale-[1.01]' : 
+        'border-gray-100 bg-white hover:border-gray-200'}`}>
+      
       <div onClick={onToggle} className={`px-8 py-6 flex items-center justify-between ${locked ? '' : 'cursor-pointer group'}`}>
         <div className="flex items-center gap-5">
-          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${locked ? 'bg-gray-200 text-gray-400' : stage.status === 'completed' ? 'bg-emerald-500 text-white shadow-lg' : stage.status === 'na' ? 'bg-gray-400 text-white' : 'bg-blue-50 text-blue-600'}`}>{locked ? <Lock size={20}/> : stage.status === 'completed' ? <CheckCircle2 size={24}/> : stage.status === 'na' ? <XCircle size={24}/> : icon}</div>
-          <div><h3 className={`text-base font-black uppercase tracking-widest ${stage.status === 'na' ? 'text-gray-400' : 'text-gray-900'}`}>{title}</h3>
-            <div className="flex gap-4 mt-1 items-center"><span className={`text-[10px] font-black uppercase ${stage.status === 'completed' ? 'text-emerald-500' : 'text-blue-600'}`}>{stage.status.replace('_', ' ')}</span><div className="h-1 w-1 bg-gray-300 rounded-full"></div><span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Budget: {stage.assignedDays}d • Spent: {spent}d</span>{isDelayed && <span className="ml-2 text-[9px] font-black text-red-600 uppercase bg-red-100 px-2 py-0.5 rounded-lg">Delayed {spent - stage.assignedDays}d</span>}</div>
+          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all 
+            ${locked ? 'bg-gray-200 text-gray-400' : 
+              isDelayedCulprit ? 'bg-red-600 text-white shadow-lg animate-pulse' : 
+              stage.status === 'completed' ? 'bg-emerald-500 text-white shadow-lg' : 
+              stage.status === 'na' ? 'bg-gray-400 text-white' : 
+              'bg-blue-50 text-blue-600'}`}>
+            {locked ? <Lock size={20}/> : 
+             isDelayedCulprit ? <AlertCircle size={24}/> :
+             stage.status === 'completed' ? <CheckCircle2 size={24}/> : 
+             stage.status === 'na' ? <XCircle size={24}/> : icon}
+          </div>
+          
+          <div>
+            <h3 className={`text-base font-black uppercase tracking-widest ${stage.status === 'na' ? 'text-gray-400' : 'text-gray-900'}`}>
+              {title}
+            </h3>
+            <div className="flex gap-4 mt-1 items-center">
+              <span className={`text-[10px] font-black uppercase ${isDelayedCulprit ? 'text-red-600' : stage.status === 'completed' ? 'text-emerald-500' : 'text-blue-600'}`}>
+                {isDelayedCulprit ? 'OVER BUDGET' : stage.status.replace('_', ' ')}
+              </span>
+              <div className="h-1 w-1 bg-gray-300 rounded-full"></div>
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
+                Allocated: {stage.assignedDays}d • Used: {spent}d
+              </span>
+              {isDelayedCulprit && (
+                <span className="ml-2 text-[9px] font-black text-white bg-red-600 px-2 py-0.5 rounded-lg">
+                  CULPRIT: +{spent - stage.assignedDays}d
+                </span>
+              )}
+            </div>
           </div>
         </div>
-        {!locked && (expanded ? <ChevronUp size={24} className="text-blue-500"/> : <ChevronDown size={24} className="text-gray-300"/>)}
+        {!locked && (expanded ? <ChevronUp size={24} className={isDelayedCulprit ? 'text-red-500' : 'text-blue-500'}/> : <ChevronDown size={24} className="text-gray-300"/>)}
       </div>
       {!locked && expanded && <div className="px-10 pb-10 animate-in fade-in slide-in-from-top-4 duration-300">{children}</div>}
     </div>

@@ -188,10 +188,11 @@ export async function POST(request: Request) {
         status: 'draft',
         order_id: `ORD-${Math.floor(1000 + Math.random() * 10000)}`,
         priority: 'medium',
+        created_by: 'admin',
+        order_source: 'structured',
         
-        // ADD THESE TWO LINES TO FIX THE ERROR:
-        created_by: 'admin',      // Since you are creating this from the admin panel
-        order_source: 'structured' // Marking this as a manual creation
+        // FIX: Capture the delivery date from the request body
+        delivery_date: body.delivery_date || null 
       }])
       .select()
       .single();
