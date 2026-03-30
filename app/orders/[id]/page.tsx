@@ -58,6 +58,7 @@ interface Order {
   updated_at: string;
   styles: OrderStyle[];
   files: OrderFile[];
+  production_workflow: any; // ADD THIS LINE
   courier_name?: string | null;
   tracking_number?: string | null;
   dispatched_at?: string | null;
