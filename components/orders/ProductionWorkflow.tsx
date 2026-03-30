@@ -63,11 +63,16 @@ export default function ProductionWorkflow({ order }: { order: any }) {
   const saveWorkflow = async (updatedStages: any) => {
     setIsSaving(true);
     try {
-      await fetch(`/api/orders/${order.id}`, {
+      const res = await fetch(`/api/orders/${order.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ production_workflow: updatedStages }),
       });
+      
+      if (res.ok) {
+        // Optional: you can call a refresh function here if you passed one
+        console.log("Saved successfully");
+      }
     } catch (err) {
       console.error("Save failed", err);
     } finally {

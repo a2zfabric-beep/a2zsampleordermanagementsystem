@@ -136,7 +136,19 @@ export async function PATCH(
     }
 
     // 3. Handle General Order Updates (Priority, Notes, etc.)
-    const allowedUpdates = ['status', 'notes', 'priority', 'delivery_date', 'sample_type', 'assigned_to'];
+    // ADDED: 'production_workflow', 'courier_name', 'tracking_number', 'dispatched_at'
+    const allowedUpdates = [
+      'status', 
+      'notes', 
+      'priority', 
+      'delivery_date', 
+      'sample_type', 
+      'assigned_to', 
+      'production_workflow',
+      'courier_name',
+      'tracking_number',
+      'dispatched_at'
+    ];
     const updates: any = {};
 
     for (const field of allowedUpdates) {
