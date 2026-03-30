@@ -164,7 +164,11 @@ export async function POST(request: NextRequest) {
 
     if (contentType?.includes('multipart/form-data')) {
       const parsedData = await parseFormData(request);
-      orderData = { ...parsedData, delivery_date: null, sample_type: null };
+      orderData = { 
+  ...parsedData, 
+  delivery_date: null, 
+  sample_type: null 
+} as CreateOrderRequest;
     } else {
       const body = await request.json();
       const validation = validateCreateOrderRequest(body);
