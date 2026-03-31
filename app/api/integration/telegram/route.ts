@@ -48,19 +48,56 @@ async function answerCallback(callbackQueryId: string, text: string) {
 
 // --- DATABASE LOGIC WRAPPERS ---
 async function getOrderList(supabase: any) {
-  const { data: orders } = await supabase.from('sample_orders').select('order_id, status').not('status', 'eq', 'dispatched').order('created_at', { ascending: false }).limit(15);
-  if (!orders || orders.length === 0) return { text: "📋 <b>No active orders found.</b>", keyboard: { inline_keyboard: [[{ text: "⬅️ Back to Menu", callback_data: "menu_main" }]] } };
-  const keyboard = { inline_keyboard: [...orders.map((o: any) => ([{ text: `📦 ${o.order_id} (${o.status})`, callback_data: `view_${o.order_id}` }])), [{ text: "⬅️ Back to Menu", callback_data: "menu_main" }]] };
-  return { text: "📋 <b>Select an order to view details:</b>", keyboard };
+  const { data: orders } = await supabase
+    .from('sample_orders')
+    .select('order_id, status, client:clients(name)')
+    .not('status', 'eq', 'dispatched')
+    .order('created_at', { ascending: false })
+    .limit(15);
+
+  if (!orders || orders.length === 0) {
+    return { text: "📋 <b>No active orders found.</b>", keyboard: { inline_keyboard: [[{ text: "⬅️ Back to Menu", callback_data: "menu_main" }]] } };
+  }
+
+  const keyboard = {
+    inline_keyboard: [
+      ...orders.map((o: any) => {
+        const clientName = o.client?.name || 'Unknown';
+        const displayName = clientName.length > 12 ? clientName.substring(0, 10) + '..' : clientName;
+        return [{ text: `${o.order_id} | ${displayName} (${o.status})`, callback_data: `view_${o.order_id}` }];
+      }),
+      [{ text: "⬅️ Back to Menu", callback_data: "menu_main" }]
+    ]
+  };
+  return { text: "📋 <b>Active Orders</b>\nSelect to view specification:", keyboard };
 }
 
 async function getOrderDetail(supabase: any, orderId: string) {
-  const { data: order } = await supabase.from('sample_orders').select('*').eq('order_id', orderId).single();
+  const { data: order } = await supabase
+    .from('sample_orders')
+    .select('*, client:clients(name)')
+    .eq('order_id', orderId)
+    .single();
+
   if (!order) return { text: "❌ Order not found.", keyboard: { inline_keyboard: [[{ text: "⬅️ Back", callback_data: "menu_list" }]] } };
+
   const { data: styles } = await supabase.from('order_styles').select('*').eq('order_id', order.id);
-  let text = `📦 <b>Order: ${order.order_id}</b>\n🏁 Status: <b>${order.status.toUpperCase()}</b>\n📅 Target: ${order.delivery_date ? new Date(order.delivery_date).toLocaleDateString() : 'N/A'}\n\n👕 <b>Styles:</b>\n`;
-  styles?.forEach((s: any) => { text += `• ${s.item_number}: ${s.style_name} (${s.quantity}pcs)\n`; });
-  const keyboard = { inline_keyboard: [[{ text: "🔬 Mark: Sampling", callback_data: `setstatus_${orderId}_sampling` }, { text: "✅ Mark: Ready", callback_data: `setstatus_${orderId}_ready` }], [{ text: "🚚 Mark: Dispatched", callback_data: `setstatus_${orderId}_dispatched` }], [{ text: "📋 Back to List", callback_data: "menu_list" }, { text: "🏠 Main Menu", callback_data: "menu_main" }]] };
+
+  const text = `🔖 <b>Order:</b> <code>${order.order_id}</code>\n` +
+    `👤 <b>Client:</b> ${order.client?.name || 'N/A'}\n` +
+    `🏁 <b>Status:</b> <code>${order.status.toUpperCase()}</code>\n` +
+    `📅 <b>Target:</b> ${order.delivery_date ? new Date(order.delivery_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : 'Flexible'}\n\n` +
+    `👕 <b>Styles (${styles?.length || 0}):</b>\n` +
+    ((styles || []).map((s: any) => `• <code>${s.item_number}</code>: ${s.style_name} (${s.quantity}pcs)`).join('\n') || '<i>No styles added</i>') +
+    `\n\n<b>Update Status:</b>`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "🔬 Sampling", callback_data: `setstatus_${orderId}_sampling_in_progress` }, { text: "✅ Ready", callback_data: `setstatus_${orderId}_ready` }],
+      [{ text: "🚚 Dispatched", callback_data: `setstatus_${orderId}_dispatched` }],
+      [{ text: "📋 List", callback_data: "menu_list" }, { text: "🏠 Menu", callback_data: "menu_main" }]
+    ]
+  };
   return { text, keyboard };
 }
 
@@ -70,7 +107,6 @@ export async function POST(request: Request) {
     const supabase = createSupabaseDirect(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
     const body = await request.json();
 
-    // --- 1. CALLBACK QUERY HANDLER ---
     if (body.callback_query) {
       const cb = body.callback_query;
       const adminId = cb.from.id.toString();
@@ -80,17 +116,21 @@ export async function POST(request: Request) {
       const data = cb.data;
 
       if (data === "menu_main") {
-        const mainKeyboard = { inline_keyboard: [[{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }], [{ text: "📎 Tag Media (Reply to Photo)", callback_data: "menu_tag_info" }]] };
-        await editTelegram(adminId, msgId, "🏠 <b>Main Menu</b>\nSelect an action below:", mainKeyboard);
+        const mainKeyboard = { inline_keyboard: [[{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }], [{ text: "📎 Tag Media (Reply)", callback_data: "menu_tag_info" }]] };
+        await editTelegram(adminId, msgId, "🏠 <b>Operations Dashboard</b>\nSelect an action:", mainKeyboard);
       } 
       else if (data === "menu_list") {
         const { text, keyboard } = await getOrderList(supabase);
         await editTelegram(adminId, msgId, text, keyboard);
       }
+      else if (data === "menu_tag_info") {
+          await answerCallback(cb.id, "Reply to an image with /tag");
+          await editTelegram(adminId, msgId, "💡 <b>How to Tag:</b>\n1. Find the factory photo\n2. Long-press/Reply to it\n3. Type <code>/tag</code>", { inline_keyboard: [[{ text: "⬅️ Back", callback_data: "menu_main" }]] });
+      }
       else if (data === "menu_stats") {
         const { data: orders } = await supabase.from('sample_orders').select('status');
-        const stats = orders?.reduce((acc: any, curr: any) => { acc[curr.status] = (acc[curr.status] || 0) + 1; return acc; }, {});
-        const statsText = `📊 <b>Status Summary</b>\n\n📝 Drafts: ${stats?.draft || 0}\n📨 Submitted: ${stats?.submitted || 0}\n🔬 Sampling: ${stats?.sampling_in_progress || 0}\n✅ Ready: ${stats?.ready || 0}\n\n<i>Use the web dashboard for deep analytics.</i>`;
+        const stats = (orders || []).reduce((acc: any, curr: any) => { acc[curr.status] = (acc[curr.status] || 0) + 1; return acc; }, {});
+        const statsText = `📊 <b>Status Summary</b>\n\n📝 Drafts: ${stats?.draft || 0}\n📨 Submitted: ${stats?.submitted || 0}\n🔬 Sampling: ${stats?.sampling_in_progress || 0}\n✅ Ready: ${stats?.ready || 0}\n🚚 Dispatched: ${stats?.dispatched || 0}`;
         await editTelegram(adminId, msgId, statsText, { inline_keyboard: [[{ text: "⬅️ Back", callback_data: "menu_main" }]] });
       }
       else if (data.startsWith("view_")) {
@@ -101,38 +141,33 @@ export async function POST(request: Request) {
       else if (data.startsWith("setstatus_")) {
         const [_, oId, status] = data.split("_");
         await supabase.from('sample_orders').update({ status }).eq('order_id', oId);
-        await answerCallback(cb.id, `✅ Updated to ${status}`);
+        await answerCallback(cb.id, `✅ Order Updated`);
         const { text, keyboard } = await getOrderDetail(supabase, oId);
-        await editTelegram(adminId, msgId, `<i>Status Updated!</i>\n\n${text}`, keyboard);
+        await editTelegram(adminId, msgId, text, keyboard);
       }
       else if (data.startsWith("attach_")) {
         const orderIdString = data.replace('attach_', '');
         const originalMediaMsg = cb.message.reply_to_message;
-        if (!originalMediaMsg) { await answerCallback(cb.id, "❌ Original media not found."); return NextResponse.json({ ok: true }); }
+        if (!originalMediaMsg) { await answerCallback(cb.id, "❌ No media found."); return NextResponse.json({ ok: true }); }
         
         const fileId = originalMediaMsg.photo ? originalMediaMsg.photo[originalMediaMsg.photo.length - 1].file_id : (originalMediaMsg.video ? originalMediaMsg.video.file_id : originalMediaMsg.document.file_id);
         const fileType = originalMediaMsg.photo ? 'image' : (originalMediaMsg.video ? 'video' : 'document');
         
-        // 1. Store Media
         await supabase.from('order_media').insert([{ order_id: orderIdString, file_id: fileId, file_type: fileType, created_at: new Date(originalMediaMsg.date * 1000).toISOString() }]);
         await answerCallback(cb.id, "✅ Media Attached!");
+        await sendTelegram(adminId, `✅ Photo attached to <b>${orderIdString}</b>`);
         
-        // 2. Separate Confirmation Message
-        await sendTelegram(adminId, `✅ Media attached to Order <b>${orderIdString}</b>`);
-        
-        // 3. Refresh Tagging List (Auto-removal logic)
         const { data: remaining } = await supabase.rpc('get_orders_without_media');
         if (!remaining || remaining.length === 0) {
-            await editTelegram(adminId, msgId, "✅ <b>All orders tagged.</b>\nNo remaining orders require media.");
+            await editTelegram(adminId, msgId, "✅ <b>All orders tagged.</b>", { inline_keyboard: [[{ text: "🏠 Main Menu", callback_data: "menu_main" }]] });
         } else {
-            const keyboard = { inline_keyboard: remaining.map((o: any) => ([{ text: `Order ${o.order_id}`, callback_data: `attach_${o.order_id}` }])) };
-            await editTelegram(adminId, msgId, "📎 <b>Media Attached.</b>\nSelect another order for this media or finish:", keyboard);
+            const keyboard = { inline_keyboard: remaining.map((o: any) => ([{ text: `${o.order_id} | ${o.client_name}`, callback_data: `attach_${o.order_id}` }])) };
+            await editTelegram(adminId, msgId, "📎 <b>Select next order to tag:</b>", keyboard);
         }
       }
       return NextResponse.json({ ok: true });
     }
 
-    // --- 2. MESSAGE HANDLER ---
     const message = body.message;
     const userId = message?.from?.id?.toString();
     if (userId !== ALLOWED_USER_ID) return NextResponse.json({ ok: true });
@@ -144,27 +179,23 @@ export async function POST(request: Request) {
       if (command === "/tag") {
         const replyTo = message.reply_to_message;
         if (!replyTo) {
-            await sendTelegram(userId, "⚠️ Please <b>reply to a photo/video</b> with /tag.");
+            await sendTelegram(userId, "⚠️ Please <b>reply to a photo</b> with /tag.");
             return NextResponse.json({ ok: true });
         }
-
         const { data: orders } = await supabase.rpc('get_orders_without_media');
-        
         if (!orders || orders.length === 0) {
-            await sendTelegram(userId, "✅ <b>All orders already have tagged media.</b>");
+            await sendTelegram(userId, "✅ <b>All orders are already tagged.</b>");
             return NextResponse.json({ ok: true });
         }
-
-        const inlineKeyboard = orders.map((o: any) => ([{ text: `Order ${o.order_id}`, callback_data: `attach_${o.order_id}` }]));
-        await sendTelegram(userId, "📎 <b>Select Order to attach to:</b>", { inline_keyboard: inlineKeyboard });
+        const keyboard = { inline_keyboard: orders.map((o: any) => ([{ text: `${o.order_id} | ${o.client_name}`, callback_data: `attach_${o.order_id}` }])) };
+        await sendTelegram(userId, "📎 <b>Attach to:</b>", keyboard);
       } 
       else {
-        const mainKeyboard = { inline_keyboard: [[{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }], [{ text: "📎 Tag Media (Reply to Photo)", callback_data: "menu_tag_info" }]] };
-        await sendTelegram(userId, "👋 <b>A2Z Operations Dashboard</b>\nSelect an action:", mainKeyboard);
+        const mainKeyboard = { inline_keyboard: [[{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }], [{ text: "📎 Tag Media (Reply)", callback_data: "menu_tag_info" }]] };
+        await sendTelegram(userId, "👋 <b>A2Z Operations Bot</b>\nSelect an action:", mainKeyboard);
       }
     }
 
-    // --- 3. EXCEL UPLOAD ---
     if (message?.document) {
       const fileRes = await axios.get(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${message.document.file_id}`);
       const response = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileRes.data.result.file_path}`, { responseType: 'arraybuffer' });
@@ -179,7 +210,7 @@ export async function POST(request: Request) {
       if (!client) return NextResponse.json({ ok: true });
       const { data: order } = await supabase.from('sample_orders').insert([{ client_id: client.id, order_id: `TG-${Math.floor(1000 + Math.random() * 9000)}`, status: 'submitted', delivery_date: new Date(Date.now() + 21 * 86400000).toISOString(), created_by: 'automation', order_source: 'email' }]).select().single();
       if (order) {
-        const stylesToInsert = rows.map((r, i) => ({ order_id: order.id, item_number: r.item_number || `STYLE-${1000 + i}`, style_name: r.style_name || 'Item', quantity: Number(r.quantity) || 1 }));
+        const stylesToInsert = rows.map((r: any, i: number) => ({ order_id: order.id, item_number: r.item_number || `STYLE-${1000 + i}`, style_name: r.style_name || 'Item', quantity: Number(r.quantity) || 1 }));
         await supabase.from('order_styles').insert(stylesToInsert);
         await sendTelegram(userId, `✅ <b>Order Created: ${order.order_id}</b>`);
       }
