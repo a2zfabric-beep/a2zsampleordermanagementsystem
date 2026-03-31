@@ -143,6 +143,7 @@ export default function ProductionWorkflow({ order }: { order: any }) {
   };
 
   const assignedTotal = Object.values(stages).reduce((a, b) => a + (Number(b.assignedDays) || 0), 0);
+  const minAllowedDate = order?.created_at ? new Date(order.created_at).toISOString().split('T')[0] : '';
 
   return (
     <div className="space-y-6 pb-20 no-scrollbar relative">
@@ -173,13 +174,37 @@ export default function ProductionWorkflow({ order }: { order: any }) {
         >
           <div className="space-y-6">
             {!stages[1].mode ? (
-              <div className="flex gap-4">
-                <button onClick={() => handleStageUpdate(1, { mode: 'stock', status: 'in_progress' })} className="flex-1 py-5 bg-emerald-600 text-white rounded-2xl font-black uppercase text-xs shadow-lg">Existing Stock</button>
-                <button onClick={() => handleStageUpdate(1, { mode: 'vendor', status: 'in_progress', poConfirmed: false })} className="flex-1 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-xs shadow-lg">Order From Vendor</button>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Set Start Date</label>
+                  <input 
+                    type="date" 
+                    min={minAllowedDate}
+                    className="p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-xs w-full max-w-xs"
+                    value={stages[1].startDate ? new Date(stages[1].startDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
+                    onChange={(e) => handleStageUpdate(1, { startDate: new Date(e.target.value).toISOString() })}
+                  />
+                </div>
+                <div className="flex gap-4">
+                  <button onClick={() => handleStageUpdate(1, { mode: 'stock', status: 'in_progress', startDate: stages[1].startDate || new Date().toISOString() })} className="flex-1 py-5 bg-emerald-600 text-white rounded-2xl font-black uppercase text-xs shadow-lg">Existing Stock</button>
+                  <button onClick={() => handleStageUpdate(1, { mode: 'vendor', status: 'in_progress', poConfirmed: false, startDate: stages[1].startDate || new Date().toISOString() })} className="flex-1 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-xs shadow-lg">Order From Vendor</button>
+                </div>
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="flex-1"><label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Budget Days</label><input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[1].assignedDays} onChange={(e) => handleStageUpdate(1, { assignedDays: Number(e.target.value) })}/></div>
+                <div className="flex items-end gap-4">
+                  <div><label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Budget Days</label><input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[1].assignedDays} onChange={(e) => handleStageUpdate(1, { assignedDays: Number(e.target.value) })}/></div>
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Manual Start Date</label>
+                    <input 
+                      type="date" 
+                      min={minAllowedDate}
+                      className="p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" 
+                      value={stages[1].startDate ? new Date(stages[1].startDate).toISOString().split('T')[0] : ''} 
+                      onChange={(e) => handleStageUpdate(1, { startDate: new Date(e.target.value).toISOString() })}
+                    />
+                  </div>
+                </div>
                 <table className="w-full text-left text-xs">
                   <thead className="font-black text-gray-400 uppercase"><tr><th className="pb-2">Fabric</th><th className="pb-2">Color</th><th className="pb-2">Qty</th>{stages[1].mode === 'vendor' && <th className="pb-2">Vendor</th>}</tr></thead>
                   <tbody>
@@ -188,32 +213,36 @@ export default function ProductionWorkflow({ order }: { order: any }) {
                     ))}
                   </tbody>
                 </table>
-                <div className="flex justify-between border-t pt-4 items-center">
+                <div className="flex justify-between border-t pt-4 items-end">
                     <button 
                       onClick={() => handleReset(1)} 
                       disabled={!canReset(1)}
-                      className={`flex items-center gap-2 text-[10px] uppercase font-black underline transition-colors ${!canReset(1) ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-500'}`}
+                      className={`flex items-center gap-2 text-[10px] uppercase font-black underline transition-colors mb-2 ${!canReset(1) ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-500'}`}
                     >
                       <RotateCcw size={12}/> Reset Stage 1
                     </button>
-                    
-                    <div className="flex gap-3">
+                    <div className="flex gap-3 items-end">
                       {stages[1].mode === 'vendor' && !stages[1].poConfirmed ? (
-                        <button 
-                          onClick={() => handleStageUpdate(1, { poConfirmed: true })} 
-                          className="px-8 py-3 bg-blue-600 text-white rounded-xl font-black uppercase text-[10px] shadow-lg"
-                        >
-                          Confirm & Create PO
-                        </button>
+                        <button onClick={() => handleStageUpdate(1, { poConfirmed: true })} className="px-8 py-3 bg-blue-600 text-white rounded-xl font-black uppercase text-[10px] shadow-lg">Confirm & Create PO</button>
                       ) : (
-                        <>
-                          {stages[1].mode === 'vendor' && (
-                            <button onClick={() => triggerPrint(1, 'Fabric Procurement PO')} className="px-6 py-3 border-2 border-blue-600 text-blue-600 rounded-xl font-black text-[10px] uppercase flex items-center gap-2">
-                              <Download size={14}/> Print PO
-                            </button>
-                          )}
-                          <button onClick={() => handleStageUpdate(1, { status: 'completed', actualDate: new Date().toISOString() })} className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px] shadow-lg">Complete Stage</button>
-                        </>
+                        <div className="flex flex-col gap-2 items-end">
+                          <label className="text-[10px] font-black text-gray-400 uppercase">Manual Completion Date</label>
+                          <div className="flex gap-2">
+                            <input 
+                              type="date" 
+                              min={stages[1].startDate ? new Date(stages[1].startDate).toISOString().split('T')[0] : minAllowedDate}
+                              className="p-2 border border-gray-200 rounded-lg text-xs font-bold"
+                              value={stages[1].actualDate ? new Date(stages[1].actualDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
+                              onChange={(e) => handleStageUpdate(1, { actualDate: new Date(e.target.value).toISOString() })}
+                            />
+                            {stages[1].mode === 'vendor' && (
+                              <button onClick={() => triggerPrint(1, 'Fabric Procurement PO')} className="px-6 py-3 border-2 border-blue-600 text-blue-600 rounded-xl font-black text-[10px] uppercase flex items-center gap-2">
+                                <Download size={14}/> Print PO
+                              </button>
+                            )}
+                            <button onClick={() => handleStageUpdate(1, { status: 'completed', actualDate: stages[1].actualDate || new Date().toISOString() })} className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px] shadow-lg">Complete Stage</button>
+                          </div>
+                        </div>
                       )}
                     </div>
                 </div>
@@ -230,34 +259,52 @@ export default function ProductionWorkflow({ order }: { order: any }) {
         ].map(s => (
           <StageCard key={s.id} title={s.name} icon={s.icon} stage={stages[s.id]} expanded={expandedStage === s.id} onToggle={() => !isLocked(s.id) && setExpandedStage(expandedStage === s.id ? null : s.id)} locked={isLocked(s.id)}>
               <div className="space-y-6">
-                <div className="flex items-end gap-4"><label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Budget Days</label><input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[s.id].assignedDays} onChange={(e) => handleStageUpdate(s.id, { assignedDays: Number(e.target.value) })}/></div>
+                <div className="flex items-end gap-4">
+                  <div><label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Budget Days</label><input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[s.id].assignedDays} onChange={(e) => handleStageUpdate(s.id, { assignedDays: Number(e.target.value) })}/></div>
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Manual Start Date</label>
+                    <input 
+                      type="date" 
+                      min={minAllowedDate}
+                      className="p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" 
+                      value={stages[s.id].startDate ? new Date(stages[s.id].startDate).toISOString().split('T')[0] : ''} 
+                      onChange={(e) => handleStageUpdate(s.id, { startDate: new Date(e.target.value).toISOString() })}
+                    />
+                  </div>
+                </div>
                 
                 {stages[s.id].status === 'pending' ? (
                   <div className="flex gap-4">
                     <button onClick={() => handleStageUpdate(s.id, { status: 'na' })} className="flex-1 py-5 border-2 text-gray-400 border-gray-100 rounded-2xl font-black uppercase text-xs">Not Required</button>
-                    <button onClick={() => handleStageUpdate(s.id, { status: 'in_progress' })} className="flex-1 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-xs shadow-lg">Start Stage</button>
+                    <button onClick={() => handleStageUpdate(s.id, { status: 'in_progress', startDate: stages[s.id].startDate || new Date().toISOString() })} className="flex-1 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-xs shadow-lg">Start Stage</button>
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {stageConfigs[s.id]?.map((config, idx) => (
+                    {stageConfigs[s.id]?.map((config: any, idx: number) => (
                       <div key={idx} className="grid grid-cols-3 gap-4 text-[10px] items-end border-b pb-2">
                         <div className="font-bold">STYLE: {config.item_number}</div>
                         <div><label className="text-gray-400 uppercase mb-1 block">{s.label}</label><input className="w-full p-2 bg-gray-50 rounded border font-bold" value={config.technique} onChange={e => {const c=[...stageConfigs[s.id]]; c[idx].technique=e.target.value; setStageConfigs({...stageConfigs, [s.id]: c})}} /></div>
                         <div><label className="text-gray-400 uppercase mb-1 block">Vendor</label><input className="w-full p-2 bg-gray-50 rounded border font-bold" value={config.vendor} onChange={e => {const c=[...stageConfigs[s.id]]; c[idx].vendor=e.target.value; setStageConfigs({...stageConfigs, [s.id]: c})}} /></div>
                       </div>
                     ))}
-                    <div className="flex justify-between items-center pt-4">
-                        <div className="flex gap-4 items-center">
+                    <div className="flex justify-between items-end pt-4">
+                        <div className="flex gap-4 items-center mb-2">
                           <button onClick={() => triggerPrint(s.id, s.name)} className="px-4 py-2 border border-blue-600 text-blue-600 rounded-lg font-black text-[10px] uppercase">Work Order</button>
-                          <button 
-                            onClick={() => handleReset(s.id)} 
-                            disabled={!canReset(s.id)}
-                            className={`flex items-center gap-1 text-[10px] uppercase font-black underline transition-colors ${!canReset(s.id) ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-600'}`}
-                          >
-                            <RotateCcw size={10}/> Reset
-                          </button>
+                          <button onClick={() => handleReset(s.id)} disabled={!canReset(s.id)} className={`flex items-center gap-1 text-[10px] uppercase font-black underline transition-colors ${!canReset(s.id) ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-600'}`}><RotateCcw size={10}/> Reset</button>
                         </div>
-                        <button onClick={() => handleStageUpdate(s.id, { status: 'completed', actualDate: new Date().toISOString() })} className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px]">Complete Stage</button>
+                        <div className="flex flex-col gap-2 items-end">
+                          <label className="text-[10px] font-black text-gray-400 uppercase">Manual Completion Date</label>
+                          <div className="flex gap-2">
+                            <input 
+                              type="date" 
+                              min={stages[s.id].startDate ? new Date(stages[s.id].startDate).toISOString().split('T')[0] : minAllowedDate}
+                              className="p-2 border border-gray-200 rounded-lg text-xs font-bold"
+                              value={stages[s.id].actualDate ? new Date(stages[s.id].actualDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
+                              onChange={(e) => handleStageUpdate(s.id, { actualDate: new Date(e.target.value).toISOString() })}
+                            />
+                            <button onClick={() => handleStageUpdate(s.id, { status: 'completed', actualDate: stages[s.id].actualDate || new Date().toISOString() })} className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-black uppercase text-[10px]">Complete Stage</button>
+                          </div>
+                        </div>
                     </div>
                   </div>
                 )}
@@ -275,7 +322,19 @@ export default function ProductionWorkflow({ order }: { order: any }) {
           locked={isLocked(5)}
         >
           <div className="space-y-6">
-            <div className="flex items-end gap-4"><label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Budget Days</label><input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[5].assignedDays} onChange={(e) => handleStageUpdate(5, { assignedDays: Number(e.target.value) })}/></div>
+            <div className="flex items-end gap-4">
+              <div><label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Budget Days</label><input type="number" className="w-24 p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" value={stages[5].assignedDays} onChange={(e) => handleStageUpdate(5, { assignedDays: Number(e.target.value) })}/></div>
+              <div>
+                <label className="text-[10px] font-black text-gray-400 uppercase block mb-1">Manual Start Date</label>
+                <input 
+                  type="date" 
+                  min={minAllowedDate}
+                  className="p-3 bg-gray-50 border border-gray-200 rounded-xl font-black text-sm" 
+                  value={stages[5].startDate ? new Date(stages[5].startDate).toISOString().split('T')[0] : ''} 
+                  onChange={(e) => handleStageUpdate(5, { startDate: new Date(e.target.value).toISOString() })}
+                />
+              </div>
+            </div>
             <table className="w-full text-left text-xs">
                 <thead><tr className="text-gray-400 uppercase font-black"><th>Style</th><th>Production Notes</th><th className="text-right">Status</th></tr></thead>
                 <tbody>
@@ -288,20 +347,21 @@ export default function ProductionWorkflow({ order }: { order: any }) {
                 ))}
                 </tbody>
             </table>
-            <div className="flex flex-col gap-3 pt-4 border-t">
-              <button 
-                onClick={() => handleStageUpdate(5, { status: 'completed', actualDate: new Date().toISOString() })} 
-                className="w-full py-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-xs shadow-xl active:scale-[0.98] transition-transform"
-              >
-                Finish Production Order
-              </button>
-              <button 
-                onClick={() => handleReset(5)} 
-                disabled={!canReset(5)}
-                className={`flex items-center justify-center gap-2 text-[10px] uppercase font-black underline p-2 ${!canReset(5) ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-600'}`}
-              >
-                <RotateCcw size={12}/> Reset Sampling Stage
-              </button>
+            <div className="flex flex-col gap-4 pt-4 border-t">
+              <div className="flex flex-col gap-2 items-end">
+                <label className="text-[10px] font-black text-gray-400 uppercase">Manual Completion Date</label>
+                <div className="flex gap-2 w-full">
+                  <input 
+                    type="date" 
+                    min={stages[5].startDate ? new Date(stages[5].startDate).toISOString().split('T')[0] : minAllowedDate}
+                    className="flex-1 p-3 border border-gray-200 rounded-xl text-sm font-bold"
+                    value={stages[5].actualDate ? new Date(stages[5].actualDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
+                    onChange={(e) => handleStageUpdate(5, { actualDate: new Date(e.target.value).toISOString() })}
+                  />
+                  <button onClick={() => handleStageUpdate(5, { status: 'completed', actualDate: stages[5].actualDate || new Date().toISOString() })} className="flex-[2] py-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-xs shadow-xl active:scale-[0.98] transition-transform">Finish Production Order</button>
+                </div>
+              </div>
+              <button onClick={() => handleReset(5)} disabled={!canReset(5)} className={`flex items-center justify-center gap-2 text-[10px] uppercase font-black underline p-2 ${!canReset(5) ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-600'}`}><RotateCcw size={12}/> Reset Sampling Stage</button>
             </div>
           </div>
         </StageCard>
