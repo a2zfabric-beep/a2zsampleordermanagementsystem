@@ -76,17 +76,17 @@ async function getWorkflowHub(supabase: any, orderId: string) {
   const { data: order } = await supabase.from('sample_orders').select('order_id, production_workflow').eq('order_id', orderId).single();
   if (!order) return { text: "❌ Order not found.", keyboard: null };
   const stages = order.production_workflow || {};
-  let text = `⚙️ <b>Production Workflow: ${orderId}</b>\n\n`;
+  let text = `⚙️ <b>Workflow Tracker: ${orderId}</b>\n\n`;
   const buttons = [];
   for (let i = 1; i <= 5; i++) {
     const s = stages[i] || { status: 'pending', assignedDays: 0 };
-    const statusIcon = s.status === 'completed' ? '✅' : (s.status === 'in_progress' ? '🔵' : (s.status === 'na' ? '⚪' : '🕒'));
+    const icon = s.status === 'completed' ? '✅' : (s.status === 'in_progress' ? '🔵' : (s.status === 'na' ? '⚪' : '🕒'));
     const spent = s.startDate ? calculateSpent(s.startDate, s.actualDate) : 0;
     const delayWarn = (spent > s.assignedDays && s.assignedDays > 0 && s.status !== 'completed') ? '⚠️' : '';
-    text += `${statusIcon} <b>Stage ${i}: ${STAGE_NAMES[i]}</b>\n   Status: <i>${s.status.replace('_', ' ')}</i>\n   Time: ${spent}d / ${s.assignedDays}d ${delayWarn}\n\n`;
-    buttons.push([{ text: `${statusIcon} Manage Stage ${i}`, callback_data: `wf_stage_${orderId}_${i}` }]);
+    text += `${icon} <b>${STAGE_NAMES[i]}</b>\n   Status: <i>${s.status.replace('_', ' ')}</i>\n   Time: ${spent}d / ${s.assignedDays}d ${delayWarn}\n\n`;
+    buttons.push([{ text: `${icon} Manage ${STAGE_NAMES[i]}`, callback_data: `wf_stage_${orderId}_${i}` }]);
   }
-  buttons.push([{ text: "⬅️ Back to Order", callback_data: `view_${orderId}` }]);
+  buttons.push([{ text: "⬅️ Back to Order Detail", callback_data: `view_${orderId}` }]);
   return { text, keyboard: { inline_keyboard: buttons } };
 }
 
@@ -97,22 +97,22 @@ async function getStageDetail(supabase: any, orderId: string, stageId: number) {
   const s = stages[stageId] || { status: 'pending', assignedDays: 0 };
   const prev = stages[stageId - 1];
   const isLocked = stageId > 1 && (!prev || (prev.status !== 'completed' && prev.status !== 'na'));
-  let text = `🏗️ <b>Stage ${stageId}: ${STAGE_NAMES[stageId]}</b>\nOrder: <code>${orderId}</code>\n\n📌 Status: <b>${s.status.toUpperCase()}</b>\n📅 Start: ${s.startDate ? new Date(s.startDate).toLocaleDateString() : 'Not started'}\n⏱ Allocated: ${s.assignedDays} Days\n`;
+  let text = `🏗️ <b>${STAGE_NAMES[stageId]}</b>\nOrder: <code>${orderId}</code>\n\n📌 Status: <b>${s.status.toUpperCase()}</b>\n📅 Start: ${s.startDate ? new Date(s.startDate).toLocaleDateString() : 'Not started'}\n📅 End: ${s.actualDate ? new Date(s.actualDate).toLocaleDateString() : 'Not finished'}\n⏱ Allocated: ${s.assignedDays} Days\n`;
   if (s.startDate) text += `⏳ Used So Far: ${calculateSpent(s.startDate, s.actualDate)} Days\n`;
-  if (isLocked) text += `\n🔒 <i>Locked: Complete Stage ${stageId-1} first.</i>`;
+  if (isLocked) text += `\n🔒 <i>Locked: Complete ${STAGE_NAMES[stageId-1]} first.</i>`;
   const buttons = [];
   if (!isLocked) {
     if (s.status === 'pending') {
-      buttons.push([{ text: "🚀 Start Stage", callback_data: `wf_update_${orderId}_${stageId}_in_progress` }]);
+      buttons.push([{ text: "🚀 Start Stage (Manual Date)", callback_data: `wf_prompt_start_${orderId}_${stageId}` }]);
       buttons.push([{ text: "⚪ Not Required", callback_data: `wf_update_${orderId}_${stageId}_na` }]);
     } else if (s.status === 'in_progress') {
-      buttons.push([{ text: "✅ Mark Completed", callback_data: `wf_prompt_complete_${orderId}_${stageId}` }]);
+      buttons.push([{ text: "✅ Mark Completed (Manual Date)", callback_data: `wf_prompt_complete_${orderId}_${stageId}` }]);
     }
     const canReset = s.status !== 'pending' && (stageId === 5 || (stages[stageId + 1]?.status === 'pending'));
     if (canReset) buttons.push([{ text: "🔄 Reset Stage", callback_data: `wf_reset_${orderId}_${stageId}` }]);
   }
   buttons.push([{ text: "📅 Set Budget Days", callback_data: `wf_prompt_budget_${orderId}_${stageId}` }]);
-  buttons.push([{ text: "⬅️ Back to Workflow", callback_data: `wf_hub_${orderId}` }]);
+  buttons.push([{ text: "⬅️ Back to Workflow Hub", callback_data: `wf_hub_${orderId}` }]);
   return { text, keyboard: { inline_keyboard: buttons } };
 }
 
@@ -156,8 +156,8 @@ export async function POST(request: Request) {
         const { data: order } = await supabase.from('sample_orders').select('production_workflow').eq('order_id', oId).single();
         if (order) {
             const stages = order.production_workflow || {};
-            stages[stageNum] = { ...stages[stageNum], status, startDate: status === 'in_progress' ? new Date().toISOString() : stages[stageNum].startDate, actualDate: (status === 'completed' || status === 'na') ? new Date().toISOString() : null };
-            if ((status === 'completed' || status === 'na') && stageNum < 5) {
+            stages[stageNum] = { ...stages[stageNum], status, startDate: status === 'in_progress' ? new Date().toISOString() : stages[stageNum].startDate, actualDate: status === 'na' ? new Date().toISOString() : null };
+            if (status === 'na' && stageNum < 5) {
                 if (!stages[stageNum + 1]) stages[stageNum + 1] = { status: 'pending', assignedDays: 0 };
                 stages[stageNum + 1].startDate = new Date().toISOString();
             }
@@ -179,13 +179,17 @@ export async function POST(request: Request) {
             if (keyboard) await editTelegram(adminId, msgId, text, keyboard);
         }
       }
+      else if (data.startsWith("wf_prompt_start_")) {
+        const [_, __, ___, oId, sId] = data.split("_");
+        await sendTelegram(adminId, `📅 <b>Start Stage: ${STAGE_NAMES[parseInt(sId)]}</b>\nOrder: <code>${oId}</code>\n\nReply with Start Date (DD-MM-YYYY) or "today"`, { force_reply: true });
+      }
       else if (data.startsWith("wf_prompt_budget_")) {
         const [_, __, ___, oId, sId] = data.split("_");
         await sendTelegram(adminId, `🔢 <b>Set Budget for ${STAGE_NAMES[parseInt(sId)]}</b>\nOrder: <code>${oId}</code>\n\nReply with days (e.g. 5)`, { force_reply: true });
       }
       else if (data.startsWith("wf_prompt_complete_")) {
         const [_, __, ___, oId, sId] = data.split("_");
-        await sendTelegram(adminId, `✅ <b>Complete Stage: ${STAGE_NAMES[parseInt(sId)]}</b>\nOrder: <code>${oId}</code>\n\nReply with date (DD-MM-YYYY) or "today"`, { force_reply: true });
+        await sendTelegram(adminId, `✅ <b>Complete Stage: ${STAGE_NAMES[parseInt(sId)]}</b>\nOrder: <code>${oId}</code>\n\nReply with completion date (DD-MM-YYYY) or "today"`, { force_reply: true });
       }
       else if (data.startsWith("dispatch_prompt_")) {
         const oId = data.replace("dispatch_prompt_", "");
@@ -203,9 +207,19 @@ export async function POST(request: Request) {
         const orderIdString = data.replace('attach_', '');
         const originalMediaMsg = cb.message.reply_to_message;
         if (originalMediaMsg) {
+            const mediaDate = new Date(originalMediaMsg.date * 1000).toISOString();
             let fileId = originalMediaMsg.photo ? originalMediaMsg.photo[originalMediaMsg.photo.length - 1].file_id : (originalMediaMsg.video ? originalMediaMsg.video.file_id : originalMediaMsg.document.file_id);
-            await supabase.from('order_media').insert([{ order_id: orderIdString, file_id: fileId, file_type: originalMediaMsg.photo ? 'image' : (originalMediaMsg.video ? 'video' : 'document'), created_at: new Date(originalMediaMsg.date * 1000).toISOString() }]);
-            await answerCallback(cb.id, "✅ Attached!");
+            await supabase.from('order_media').insert([{ order_id: orderIdString, file_id: fileId, file_type: originalMediaMsg.photo ? 'image' : (originalMediaMsg.video ? 'video' : 'document'), created_at: mediaDate }]);
+            
+            // AUTOMATION: Hook Stage 5 Completion on Tagging
+            const { data: order } = await supabase.from('sample_orders').select('production_workflow').eq('order_id', orderIdString).single();
+            if(order) {
+                const wf = order.production_workflow || {};
+                wf[5] = { ...wf[5], status: 'completed', actualDate: mediaDate };
+                await supabase.from('sample_orders').update({ production_workflow: wf }).eq('order_id', orderIdString);
+            }
+
+            await answerCallback(cb.id, "✅ Attached & Stage 5 Completed!");
             const { data: remaining } = await supabase.rpc('get_orders_without_media');
             if (!remaining || remaining.length === 0) await editTelegram(adminId, msgId, "✅ <b>All tagged.</b>");
             else { const keyboard = { inline_keyboard: remaining.map((o: any) => ([{ text: `${o.order_id} | ${o.client_name}`, callback_data: `attach_${o.order_id}` }])) }; await editTelegram(adminId, msgId, "📎 <b>Tag next:</b>", keyboard); }
@@ -228,13 +242,19 @@ export async function POST(request: Request) {
           const { data: order } = await supabase.from('sample_orders').select('production_workflow').eq('order_id', oId).single();
           if (order) {
             const stages = order.production_workflow || {};
-            if (rText.includes('Set Budget')) {
+            const parseDate = (input: string) => input.toLowerCase() === 'today' ? new Date().toISOString() : (()=>{ const [d,m,y] = input.split('-'); return new Date(`${y}-${m}-${d}`).toISOString(); })();
+
+            if (rText.includes('Start Stage')) {
+                const stageId = Object.keys(STAGE_NAMES).find(key => rText.includes(STAGE_NAMES[parseInt(key)]));
+                if (stageId) { const d = parseDate(text); stages[stageId] = { ...stages[stageId], status: 'in_progress', startDate: d }; await supabase.from('sample_orders').update({ production_workflow: stages }).eq('order_id', oId); await sendTelegram(userId, "✅ Start date set."); }
+            }
+            else if (rText.includes('Set Budget')) {
               const stageId = Object.keys(STAGE_NAMES).find(key => rText.includes(STAGE_NAMES[parseInt(key)]));
               if (stageId) { stages[stageId] = { ...stages[stageId], assignedDays: parseInt(text) || 0 }; await supabase.from('sample_orders').update({ production_workflow: stages }).eq('order_id', oId); await sendTelegram(userId, "✅ Budget updated"); }
             }
             else if (rText.includes('Complete Stage')) {
               const stageId = parseInt(Object.keys(STAGE_NAMES).find(key => rText.includes(STAGE_NAMES[parseInt(key)])) || "0");
-              const dateStr = text.toLowerCase() === 'today' ? new Date().toISOString() : (()=>{ const [d,m,y] = text.split('-'); return new Date(`${y}-${m}-${d}`).toISOString(); })();
+              const dateStr = parseDate(text);
               stages[stageId] = { ...stages[stageId], status: 'completed', actualDate: dateStr };
               if (stageId < 5) { if (!stages[stageId + 1]) stages[stageId + 1] = { status: 'pending', assignedDays: 0 }; stages[stageId + 1].startDate = dateStr; }
               await supabase.from('sample_orders').update({ production_workflow: stages }).eq('order_id', oId); await sendTelegram(userId, "✅ Stage completed");
@@ -258,7 +278,7 @@ export async function POST(request: Request) {
         await sendTelegram(userId, "📎 <b>Attach to:</b>", keyboard);
       } else {
         const mainKeyboard = { inline_keyboard: [[{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }], [{ text: "📎 Tag Media (Reply)", callback_data: "menu_tag_info" }]] };
-        await sendTelegram(userId, "👋 <b>Operations</b>", mainKeyboard);
+        await sendTelegram(userId, "👋 <b>Dashboard</b>", mainKeyboard);
       }
     }
 
@@ -272,11 +292,24 @@ export async function POST(request: Request) {
       if (clientEmail) {
         let { data: client } = await supabase.from('clients').select('id').eq('email', clientEmail).single();
         if (!client) { const { data: nc } = await supabase.from('clients').insert([{ name: firstRow.client_name || 'New Client', email: clientEmail }]).select().single(); client = nc; }
-        const { data: order } = await supabase.from('sample_orders').insert([{ client_id: client?.id, order_id: `TG-${Math.floor(1000 + Math.random() * 9000)}`, status: 'submitted', delivery_date: new Date(Date.now() + 21 * 86400000).toISOString(), created_by: 'automation', order_source: 'email' }]).select().single();
+        
+        // AUTOMATION: Hook Stage 5 auto-start on order creation
+        const initialWF = { 5: { status: 'in_progress', assignedDays: 0, startDate: new Date().toISOString() } };
+        
+        const { data: order } = await supabase.from('sample_orders').insert([{
+            client_id: client?.id,
+            order_id: `TG-${Math.floor(1000 + Math.random() * 9000)}`,
+            status: 'submitted',
+            delivery_date: new Date(Date.now() + 21 * 86400000).toISOString(),
+            created_by: 'automation',
+            order_source: 'email',
+            production_workflow: initialWF
+        }]).select().single();
+
         if (order) {
             const stylesToInsert = rows.map((r: any, i: number) => ({ order_id: order.id, item_number: r.item_number || `STYLE-${1000 + i}`, style_name: r.style_name || 'Item', quantity: Number(r.quantity) || 1 }));
             await supabase.from('order_styles').insert(stylesToInsert);
-            await sendTelegram(userId, `✅ Order Created: ${order.order_id}`);
+            await sendTelegram(userId, `✅ Order Created: ${order.order_id}\n🔬 Pattern & Sampling Auto-Started.`);
         }
       }
     }
