@@ -122,23 +122,41 @@ export default function OrderDetailsPage() {
 
   const handleUpdateStatus = async () => {
     if (!order) return;
+
+    // --- DISPATCH VALIDATION ---
+    if (status === 'dispatched') {
+      if (!courierName.trim() || !trackingNumber.trim() || !dispatchedAt) {
+        alert("❌ DATA REQUIRED: Please enter Courier Name, Tracking Number, and Date before saving.");
+        return;
+      }
+    }
+
     try {
       setUpdating(true);
       const payload: any = { status, notes };
+      
       if (status === 'dispatched') {
         payload.courier_name = courierName;
         payload.tracking_number = trackingNumber;
-        payload.dispatched_at = dispatchedAt;
+        // Ensure date is stored in ISO format
+        payload.dispatched_at = new Date(dispatchedAt).toISOString();
       }
+
       const response = await fetch(`/api/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      fetchOrder();
-      alert('Order status updated!');
+
+      if (response.ok) {
+        fetchOrder();
+        alert('✅ Order status and dispatch details updated!');
+      } else {
+        const errorData = await response.json();
+        alert(`❌ Error: ${errorData.error || 'Update failed'}`);
+      }
     } catch (err: any) {
-      alert(err.message);
+      alert("Network Error: " + err.message);
     } finally {
       setUpdating(false);
     }
