@@ -382,7 +382,15 @@ export default function ProductionWorkflow({ order }: { order: any }) {
 function StageCard({ title, icon, stage, expanded, onToggle, locked = false, children }: any) {
   const start = stage.startDate ? new Date(stage.startDate) : null;
   const end = stage.actualDate ? new Date(stage.actualDate) : new Date();
-  const spent = start ? Math.max(0, Math.ceil((end.getTime() - start.getTime()) / (1000 * 3600 * 24))) : 0;
+  
+  // Normalize dates to midnight to count full calendar days elapsed
+  const d1 = start ? new Date(start).setHours(0, 0, 0, 0) : null;
+  const d2 = new Date(end).setHours(0, 0, 0, 0);
+  
+  // Math.floor ensures that starting on the 30th and being on the 31st counts as exactly 1 day
+  const spent = d1 ? Math.max(0, Math.floor((d2 - d1) / (1000 * 3600 * 24))) : 0;
+  
+  // Delay only triggers if spent days actually exceeds the assigned budget
   const isDelayed = spent > stage.assignedDays && stage.assignedDays > 0;
 
   return (
