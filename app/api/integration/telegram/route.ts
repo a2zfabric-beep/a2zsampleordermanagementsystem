@@ -135,12 +135,13 @@ export async function POST(request: Request) {
         const { text, keyboard } = await getOrderDetail(supabase, oId);
         await editTelegram(adminId, msgId, text, keyboard);
       }
-      // --- NEW DISPATCH PROMPT HANDLER ---
       else if (data.startsWith("dispatch_prompt_")) {
         const oId = data.replace("dispatch_prompt_", "");
-        await answerCallback(cb.id, "Ready to dispatch");
+        await answerCallback(cb.id, "Dispatching...");
         const prompt = `🚚 <b>Dispatching Order:</b> <code>${oId}</code>\n\nReply to this message with details:\n<code>Tracking # | Courier | DD-MM-YYYY</code>\n\nExample:\n<code>BD123456 | Blue Dart | 31-03-2026</code>`;
-        await sendTelegram(adminId, prompt, { force_reply: true });
+        // Added Back Button here
+        const keyboard = { inline_keyboard: [[{ text: "❌ Cancel & Go Back", callback_data: `view_${oId}` }]] };
+        await editTelegram(adminId, msgId, prompt, keyboard);
       }
       else if (data.startsWith("attach_")) {
         const orderIdString = data.replace('attach_', '');
@@ -163,7 +164,6 @@ export async function POST(request: Request) {
 
     const text = message?.text;
     if (text) {
-      // --- HANDLE DISPATCH DATA PARSING (Stateful Reply) ---
       if (message.reply_to_message && message.reply_to_message.text.includes('Dispatching Order:')) {
         const orderIdMatch = message.reply_to_message.text.match(/(TG-\d+|ORD-\d+)/);
         const orderId = orderIdMatch ? orderIdMatch[0] : null;
@@ -201,7 +201,6 @@ export async function POST(request: Request) {
     }
 
     if (message?.document) {
-      // Excel logic remains untouched...
       const fileRes = await axios.get(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${message.document.file_id}`);
       const response = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileRes.data.result.file_path}`, { responseType: 'arraybuffer' });
       const workbook = XLSX.read(response.data, { type: 'buffer' });
