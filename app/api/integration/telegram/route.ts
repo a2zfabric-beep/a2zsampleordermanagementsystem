@@ -177,7 +177,7 @@ export async function POST(request: Request) {
             order_id: orderId, garment_type: gType, style_name: styleName,
             remaining_fields: fields, current_field: "READY_FOR_MEDIA"
         }]);
-        await editTelegram(chatId, msgId, `📸 <b>Session Started: ${styleName}</b>\n\nReply to any photo with /tag to begin mapping.\n\nRequired: ${fields.join(', ')}`);
+        await editTelegram(chatId, msgId, `📸 <b>Session Started: ${styleName}</b>\n\nRequired: <i>${fields.join(', ')}</i>\n\n👉 <b>HOW TO MAP:</b>\nReply to any photo with <code>/map</code> to assign it to a measurement.`);
       }
       else if (data.startsWith("ts_set_field_")) {
         const fieldName = data.replace("ts_set_field_", "");
@@ -242,14 +242,22 @@ export async function POST(request: Request) {
         if (order) {
             const wf = order.production_workflow || {};
             const now = new Date().toISOString();
-            for (let i = 1; i < sNum; i++) { if (!wf[i] || (wf[i].status !== 'completed' && wf[i].status !== 'na')) { wf[i] = { ...(wf[i] || { assignedDays: 0 }), status: 'completed', actualDate: now, startDate: wf[i]?.startDate || now }; } }
+            // WATERFALL: Auto-complete all previous stages
+            for (let i = 1; i < sNum; i++) {
+                if (!wf[i] || (wf[i].status !== 'completed' && wf[i].status !== 'na')) {
+                    wf[i] = { ...(wf[i] || { assignedDays: 0 }), status: 'completed', actualDate: now, startDate: wf[i]?.startDate || now };
+                }
+            }
             const currentBudget = wf[sNum]?.assignedDays || 0;
             wf[sNum] = { ...(wf[sNum] || { assignedDays: 0 }), status: 'in_progress', startDate: now };
             await supabase.from('sample_orders').update({ production_workflow: wf }).eq('order_id', orderId);
+            
             if (currentBudget === 0) {
                 await editTelegram(chatId, msgId, `✅ <b>Success!</b>\nOrder: ${orderId}\nStage: ${STAGE_NAMES[sNum]} started.\n\n🔢 Please set the budget below:`);
                 await sendTelegram(chatId, `🔢 <b>Set Budget (Days) for ${STAGE_NAMES[sNum]}</b>\nID: <code>${orderId}</code>\n\nReply with a number (e.g. 5)`, { force_reply: true });
-            } else { await editTelegram(chatId, msgId, `✅ <b>Success!</b>\nOrder: ${orderId}\nStage: ${STAGE_NAMES[sNum]} started.`); }
+            } else {
+                await editTelegram(chatId, msgId, `✅ <b>Success!</b>\nOrder: ${orderId}\nStage: ${STAGE_NAMES[sNum]} started.`);
+            }
         }
       }
 
@@ -360,24 +368,48 @@ export async function POST(request: Request) {
     if (!message) return NextResponse.json({ ok: true });
     const userId = message.from.id.toString();
     const chatId = message.chat.id.toString();
+
     if (userId !== ALLOWED_USER_ID) return NextResponse.json({ ok: true });
 
     if (message.text) {
       const text = message.text;
       const { data: session } = await supabase.from('tagging_sessions').select('*').eq('user_id', userId).single();
 
-      if (session) {
-        if (text.toLowerCase() === 'cancel') { await supabase.from('tagging_sessions').delete().eq('user_id', userId); await sendTelegram(chatId, "❌ Session cancelled."); return NextResponse.json({ ok: true }); }
-        if (session.current_field === "WAITING_FOR_STYLE_NAME") {
-          const fields = await getMeasurementTemplate(supabase, session.garment_type);
-          await supabase.from('tagging_sessions').update({ style_name: text, current_field: "READY_FOR_MEDIA", remaining_fields: fields }).eq('user_id', userId);
-          await sendTelegram(chatId, `📸 <b>Session Started: ${text}</b>\n\nReply to any photo with /tag to begin mapping.`);
+      // --- 1. TECHNICAL MAPPING COMMAND (/map) ---
+      if (text.startsWith("/map")) {
+        if (!session) {
+          await sendTelegram(chatId, "⚠️ No active session. Start with /sample_approved");
           return NextResponse.json({ ok: true });
         }
+        const mediaMsg = message.reply_to_message;
+        if (!mediaMsg || !(mediaMsg.photo || mediaMsg.video || mediaMsg.document)) {
+          await sendTelegram(chatId, "❌ Please <b>REPLY</b> to a photo with <code>/map</code> to assign it.");
+          return NextResponse.json({ ok: true });
+        }
+        await sendTelegram(chatId, `📍 <b>Mapping: ${session.style_name}</b>\nWhich measurement is this?`, {
+            reply_to_message_id: mediaMsg.message_id,
+            reply_markup: generateMeasurementKeyboard(session)
+        });
+        return NextResponse.json({ ok: true });
       }
 
+      // --- 2. SESSION STYLE NAME INPUT ---
+      if (session && session.current_field === "WAITING_FOR_STYLE_NAME") {
+        if (text.toLowerCase() === 'cancel') {
+          await supabase.from('tagging_sessions').delete().eq('user_id', userId);
+          await sendTelegram(chatId, "❌ Session cancelled.");
+        } else {
+          const fields = await getMeasurementTemplate(supabase, session.garment_type);
+          await supabase.from('tagging_sessions').update({ style_name: text, current_field: "READY_FOR_MEDIA", remaining_fields: fields }).eq('user_id', userId);
+          await sendTelegram(chatId, `📸 <b>Session Started: ${text}</b>\n\nReply to any tech photo with <code>/map</code> to begin.`);
+        }
+        return NextResponse.json({ ok: true });
+      }
+
+      // --- 3. CORE COMMANDS ---
       if (text === "/sample_approved") { await sendTelegram(chatId, "🛠 <b>Sample Approval</b>", { inline_keyboard: [[{ text: "🚀 Start", callback_data: "ts_init_sample" }]] }); return NextResponse.json({ ok: true }); }
       if (text === "/production_piece") { await sendTelegram(chatId, "🏭 <b>Production Tagging</b>", { inline_keyboard: [[{ text: "🚀 Start", callback_data: "ts_init_production" }]] }); return NextResponse.json({ ok: true }); }
+      
       if (text.startsWith("/pending")) {
         const { data: orders } = await supabase.from('sample_orders').select('order_id, production_workflow, client:clients(name)').not('status', 'eq', 'dispatched');
         let resp = "⏳ <b>Pending Tasks</b>\n\n";
@@ -395,6 +427,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true });
       }
 
+      // --- 4. REPLY HANDLERS (Dispatch & Budget) ---
       if (message.reply_to_message?.text?.startsWith('🚚 Dispatching Order:')) {
         const oId = message.reply_to_message.text.match(/(TG-\d+|ORD-\d+|FAC-\d+|TASK-\d+)/)?.[0];
         if (text.toLowerCase() === 'cancel') { await sendTelegram(chatId, "❌ Dispatch cancelled."); return NextResponse.json({ ok: true }); }
@@ -403,7 +436,7 @@ export async function POST(request: Request) {
             const [tracking, courier, dateStr] = parts; const [d, m, y] = dateStr.split('-');
             await supabase.from('sample_orders').update({ status: 'dispatched', courier_name: courier, tracking_number: tracking, dispatched_at: new Date(`${y}-${m}-${d}`).toISOString() }).eq('order_id', oId);
             await sendTelegram(chatId, `✅ <b>Order ${oId} Dispatched</b>`);
-        } else { await sendTelegram(chatId, "⚠️ Format: Tracking | Courier | DD-MM-YYYY", { force_reply: true }); }
+        } else { await sendTelegram(chatId, "⚠️ Use: Tracking | Courier | DD-MM-YYYY", { force_reply: true }); }
         return NextResponse.json({ ok: true });
       }
 
@@ -418,6 +451,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true });
       }
 
+      // --- 5. WORKFLOW HANDLERS ---
       if (text.startsWith("/assign") || text.startsWith("/task")) {
         const mediaMsg = message.reply_to_message;
         if (!mediaMsg) { await sendTelegram(chatId, "❌ Reply to media with /assign"); return NextResponse.json({ ok: true }); }
@@ -437,25 +471,18 @@ export async function POST(request: Request) {
       }
     }
 
-    const mediaObj = message.photo || message.video || message.document;
-    if (mediaObj && message.reply_to_message) {
-      const { data: session } = await supabase.from('tagging_sessions').select('*').eq('user_id', userId).single();
-      if (session && session.current_field !== "WAITING_FOR_STYLE_NAME") {
-        await sendTelegram(chatId, `📍 <b>Media Detected</b>\nWhich measurement is this?`, { reply_to_message_id: message.message_id, reply_markup: generateMeasurementKeyboard(session) });
-        return NextResponse.json({ ok: true });
-      }
-    }
-
+    // --- 6. EXCEL IMPORT ---
     if (message.document && message.document.file_name?.endsWith('.xlsx')) {
         const fileRes = await axios.get(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${message.document.file_id}`);
         const response = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileRes.data.result.file_path}`, { responseType: 'arraybuffer' });
-        const rows: any[] = XLSX.utils.sheet_to_json(XLSX.read(response.data, { type: 'buffer' }).Sheets[0]);
+        const workbook = XLSX.read(response.data, { type: 'buffer' });
+        const rows: any[] = XLSX.utils.sheet_to_json(workbook.Sheets[0]);
         if (rows[0]?.client_email) {
             let { data: client } = await supabase.from('clients').select('id').eq('email', rows[0].client_email).single();
             if (!client) { const { data: nc } = await supabase.from('clients').insert([{ name: rows[0].client_name, email: rows[0].client_email }]).select().single(); client = nc; }
             const initialWF = { 5: { status: 'in_progress', assignedDays: 7, startDate: new Date().toISOString() } };
             const { data: order } = await supabase.from('sample_orders').insert([{ client_id: client?.id, order_id: `TG-${Math.floor(1000 + Math.random() * 9000)}`, status: 'submitted', production_workflow: initialWF }]).select().single();
-            if (order) { await supabase.from('order_styles').insert(rows.map((r: any) => ({ order_id: order.id, style_name: r.style_name, quantity: r.quantity }))); await sendTelegram(chatId, `✅ <b>Imported.</b>`); }
+            if (order) { await supabase.from('order_styles').insert(rows.map((r: any) => ({ order_id: order.id, style_name: r.style_name, quantity: r.quantity }))); await sendTelegram(chatId, `✅ <b>Order Imported via Excel.</b>`); }
         }
     }
     return NextResponse.json({ ok: true });
