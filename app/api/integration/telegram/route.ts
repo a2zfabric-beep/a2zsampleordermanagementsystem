@@ -43,7 +43,6 @@ function calculateSpent(start: string, end?: string) {
 
 // --- UI GENERATORS ---
 async function getOrderList(supabase: any) {
-  // Orders only disappear when status is 'dispatched'. 'ready' orders stay in the list.
   const { data: orders } = await supabase.from('sample_orders').select('order_id, status, client:clients(name)').not('status', 'eq', 'dispatched').order('created_at', { ascending: false }).limit(15);
   if (!orders || orders.length === 0) return { text: "📋 <b>No active orders found.</b>", keyboard: { inline_keyboard: [[{ text: "⬅️ Back to Menu", callback_data: "menu_main" }]] } };
   const keyboard = { inline_keyboard: [...orders.map((o: any) => {
@@ -180,11 +179,8 @@ export async function POST(request: Request) {
             const stages = order.production_workflow || {};
             stages[stageNum] = { ...stages[stageNum], status: 'pending', actualDate: null };
             if (stageNum < 5 && stages[stageNum + 1]) stages[stageNum + 1].startDate = null;
-            
-            // Logic: If we reset stage 5, move order from 'ready' back to 'sampling_in_progress'
             let newStatus = order.status;
             if (stageNum === 5 && order.status === 'ready') newStatus = 'sampling_in_progress';
-
             await supabase.from('sample_orders').update({ production_workflow: stages, status: newStatus }).eq('order_id', oId);
             const { text, keyboard } = await getStageDetail(supabase, oId, stageNum);
             if (keyboard) await editTelegram(chatId, msgId, text, keyboard);
@@ -230,12 +226,10 @@ export async function POST(request: Request) {
 
         if (fileId) {
             await supabase.from('order_media').insert([{ order_id: orderId, file_id: fileId, file_type: type, created_at: mediaDate }]);
-            
             const { data: order } = await supabase.from('sample_orders').select('production_workflow').eq('order_id', orderId).single();
             if (order) {
                 const wf = order.production_workflow || {};
                 wf[5] = { ...(wf[5] || { assignedDays: 0 }), status: 'completed', actualDate: mediaDate };
-                // Automation: Mark Stage 5 complete AND mark overall Order status as READY
                 await supabase.from('sample_orders').update({ production_workflow: wf, status: 'ready' }).eq('order_id', orderId);
             }
             await editTelegram(chatId, msgId, `✅ <b>Media Attached to ${orderId}</b>\n🏁 Overall Status: <b>READY</b>`);
@@ -255,7 +249,6 @@ export async function POST(request: Request) {
     if (message.text) {
       const text = message.text;
 
-      // Handle Dispatch Reply
       if (message.reply_to_message?.text?.startsWith('🚚 Dispatching Order:')) {
         const oId = message.reply_to_message.text.match(/(TG-\d+|ORD-\d+)/)?.[0];
         if (text.toLowerCase() === 'cancel') {
@@ -283,12 +276,29 @@ export async function POST(request: Request) {
           await sendTelegram(chatId, "❌ Please reply to an image/video/document with /tag.");
           return NextResponse.json({ ok: true });
         }
-        const { data: orders } = await supabase.rpc('get_orders_without_media');
-        const keyboard = { inline_keyboard: (orders || []).map((o: any) => ([{ text: `${o.order_id} | ${o.client_name}`, callback_data: `attach_${o.order_id}_${mediaMsg.message_id}` }])) };
+        
+        // REPLACED RPC WITH DIRECT QUERY TO ENSURE BUTTONS APPEAR
+        const { data: orders } = await supabase.from('sample_orders')
+            .select('order_id, clients(name)')
+            .not('status', 'eq', 'dispatched')
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        const buttons = (orders || []).map((o: any) => ([{ 
+            text: `${o.order_id} | ${o.clients?.name || 'Client'}`, 
+            callback_data: `attach_${o.order_id}_${mediaMsg.message_id}` 
+        }]));
+
+        const keyboard = { inline_keyboard: buttons.length > 0 ? buttons : [[{ text: "🏠 Menu", callback_data: "menu_main" }]] };
+        
         await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-            chat_id: chatId, text: "📎 <b>Tag media to:</b>", parse_mode: 'HTML', reply_to_message_id: mediaMsg.message_id, reply_markup: keyboard
+            chat_id: chatId, 
+            text: buttons.length > 0 ? "📎 <b>Tag media to:</b>" : "📋 <b>No active orders found to tag.</b>", 
+            parse_mode: 'HTML', 
+            reply_to_message_id: mediaMsg.message_id, 
+            reply_markup: keyboard
         });
-      } else if (text === "/start" || text.toLowerCase() === "menu") {
+      } else if (text === "/start" || text.toLowerCase() === "menu" || text.toLowerCase() === "/menu") {
         const mainKeyboard = { inline_keyboard: [[{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }], [{ text: "📎 Tag Media (Reply)", callback_data: "menu_tag_info" }]] };
         await sendTelegram(chatId, "👋 <b>Garment Admin Dashboard</b>", mainKeyboard);
       }
