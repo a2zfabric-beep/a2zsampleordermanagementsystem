@@ -119,7 +119,11 @@ async function getStageDetail(supabase: any, orderId: string, stageId: number) {
 export async function POST(request: Request) {
   try {
     const ALLOWED_USER_ID = process.env.TELEGRAM_ALLOWED_USER_ID;
-    const supabase = createSupabaseDirect(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+    // Use SERVICE_ROLE_KEY to perform admin actions safely on the server
+    const supabase = createSupabaseDirect(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!, 
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
     const body = await request.json();
 
     if (body.callback_query) {
