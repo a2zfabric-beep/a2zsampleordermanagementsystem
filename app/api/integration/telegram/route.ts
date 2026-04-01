@@ -172,7 +172,12 @@ export async function POST(request: Request) {
         }
       }
       else if (data === "menu_main") {
-        const mainKeyboard = { inline_keyboard: [[{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }]] };
+        const mainKeyboard = { 
+  inline_keyboard: [
+    [{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }],
+    [{ text: "⏳ Pending Tasks", callback_data: "menu_pending" }]
+  ] 
+};
         await editTelegram(chatId, msgId, "🏠 <b>Admin Dashboard</b>", mainKeyboard);
       }
       else if (data === "menu_stats") {
@@ -180,6 +185,23 @@ export async function POST(request: Request) {
         const { count: ready } = await supabase.from('sample_orders').select('*', { count: 'exact', head: true }).eq('status', 'ready');
         const statText = `📊 <b>System Stats</b>\n\nActive Orders: <b>${total || 0}</b>\nReady for Dispatch: <b>${ready || 0}</b>`;
         await editTelegram(chatId, msgId, statText, { inline_keyboard: [[{ text: "⬅️ Back", callback_data: "menu_main" }]] });
+      }
+      else if (data === "menu_pending") {
+        const { data: orders } = await supabase.from('sample_orders').select('order_id, production_workflow, client:clients(name)').not('status', 'eq', 'dispatched');
+        let response = "⏳ <b>Pending Tasks</b>\n\n";
+        (orders || []).forEach((o: any) => {
+            const wf = o.production_workflow || {};
+            const activeId = Object.keys(wf).find(k => wf[k].status === 'in_progress');
+            if (activeId) {
+                const s = wf[activeId];
+                const budget = s.assignedDays || 0;
+                const due = new Date(new Date(s.startDate).getTime() + budget * 86400000);
+                const diff = Math.ceil((due.getTime() - new Date().getTime()) / 86400000);
+                const dueStr = diff >= 0 ? `${diff}d left` : `⚠️ ${Math.abs(diff)}d overdue`;
+                response += `👤 ${o.client?.name || 'N/A'} | <code>${o.order_id}</code>\n📍 ${STAGE_NAMES[parseInt(activeId)]} | ${dueStr}\n\n`;
+            }
+        });
+        await editTelegram(chatId, msgId, response || "✅ No pending tasks.", { inline_keyboard: [[{ text: "⬅️ Back", callback_data: "menu_main" }]] });
       }
       else if (data === "menu_list") {
         const { text, keyboard } = await getOrderList(supabase);
@@ -308,8 +330,30 @@ export async function POST(request: Request) {
         const buttons = (orders || []).map((o: any) => ([{ text: `${o.order_id} | ${o.client?.name || 'Client'}`, callback_data: `attach_${o.order_id}_${mediaMsg.message_id}` }]));
         await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, { chat_id: chatId, text: "📎 <b>Tag media to:</b>", parse_mode: 'HTML', reply_to_message_id: mediaMsg.message_id, reply_markup: { inline_keyboard: buttons } });
       }
+      else if (text.startsWith("/pending")) {
+        const { data: orders } = await supabase.from('sample_orders').select('order_id, production_workflow, client:clients(name)').not('status', 'eq', 'dispatched');
+        let response = "⏳ <b>Live Pending Tasks</b>\n\n";
+        (orders || []).forEach((o: any) => {
+            const wf = o.production_workflow || {};
+            const activeId = Object.keys(wf).find(k => wf[k].status === 'in_progress');
+            if (activeId) {
+                const s = wf[activeId];
+                const budget = s.assignedDays || 0;
+                const due = new Date(new Date(s.startDate).getTime() + budget * 86400000);
+                const diff = Math.ceil((due.getTime() - new Date().getTime()) / 86400000);
+                const dueStr = diff >= 0 ? `🟢 ${diff} days left` : `🔴 OVERDUE ${Math.abs(diff)} days`;
+                response += `👤 <b>${o.client?.name || 'N/A'}</b>\n📦 ${o.order_id} (${STAGE_NAMES[parseInt(activeId)]})\n📅 ${dueStr}\n\n`;
+            }
+        });
+        await sendTelegram(chatId, response || "✅ No pending tasks found.");
+      }
       else if (text === "/start" || text.toLowerCase() === "menu") {
-        const mainKeyboard = { inline_keyboard: [[{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }]] };
+        const mainKeyboard = { 
+          inline_keyboard: [
+            [{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }],
+            [{ text: "⏳ Pending Tasks", callback_data: "menu_pending" }]
+          ] 
+        };
         await sendTelegram(chatId, "👋 <b>Garment Admin Dashboard</b>", mainKeyboard);
       }
     }
