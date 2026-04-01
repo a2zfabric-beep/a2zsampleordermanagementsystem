@@ -69,7 +69,7 @@ async function getOrderDetail(supabase: any, orderId: string) {
 
 async function getWorkflowHub(supabase: any, orderId: string) {
   const { data: order } = await supabase.from('sample_orders').select('order_id, production_workflow').eq('order_id', orderId).single();
-  if (!order) return { text: "❌ Order not found.", keyboard: null };
+  if (!order) return { text: "❌ Not found.", keyboard: null };
   const stages = order.production_workflow || {};
   let text = `⚙️ <b>Workflow: ${orderId}</b>\n\n`;
   const buttons = [];
@@ -89,8 +89,11 @@ async function getStageDetail(supabase: any, orderId: string, stageId: number) {
   if (!order) return { text: "❌ Not found.", keyboard: null };
   const s = (order.production_workflow || {})[stageId] || { status: 'pending', assignedDays: 0 };
   let text = `🏗️ <b>${STAGE_NAMES[stageId]}</b>\nID: <code>${orderId}</code>\n\n📌 Status: <b>${s.status.toUpperCase()}</b>\n📅 Start: ${s.startDate ? new Date(s.startDate).toLocaleDateString() : 'Not started'}\n⏱ Budget: ${s.assignedDays} Days\n`;
+  if (s.startDate) text += `⏳ Used So Far: ${calculateSpent(s.startDate, s.actualDate)} Days\n`;
+  
   const buttons = [
     [{ text: "✅ Mark Completed", callback_data: `wf_update_${orderId}_${stageId}_completed` }],
+    [{ text: "📅 Set Budget Days", callback_data: `wf_prompt_budget_${orderId}_${stageId}` }],
     [{ text: "🔄 Reset Stage", callback_data: `wf_reset_${orderId}_${stageId}` }],
     [{ text: "⬅️ Back to Workflow Hub", callback_data: `wf_hub_${orderId}` }]
   ];
@@ -113,7 +116,6 @@ export async function POST(request: Request) {
 
       if (adminId !== ALLOWED_USER_ID) return NextResponse.json({ ok: true });
 
-      // --- 1. DYNAMIC ASSIGNMENT HANDLERS ---
       if (data.startsWith("asgn_mode_")) {
         const [_, __, mediaId, mode] = data.split("_");
         if (mode === "standalone") {
@@ -125,7 +127,7 @@ export async function POST(request: Request) {
             await editTelegram(chatId, msgId, `✅ <b>Standalone Task Created: ${orderId}</b>\n🔬 Stage 5 (Sampling) Auto-Started.`);
         } else {
             const { keyboard } = await getOrderList(supabase);
-            const orderButtons = keyboard.inline_keyboard.filter((row: any) => row[0].callback_data.startsWith('view_'));
+            const orderButtons = (keyboard?.inline_keyboard || []).filter((row: any) => row[0].callback_data.startsWith('view_'));
             const newKeyboard = { inline_keyboard: orderButtons.map((row: any) => ([{ text: row[0].text, callback_data: `asgn_ord_${mediaId}_${row[0].callback_data.replace('view_', '')}` }])) };
             await editTelegram(chatId, msgId, "🎯 <b>Select Order to Link Media:</b>", newKeyboard);
         }
@@ -145,8 +147,6 @@ export async function POST(request: Request) {
             await editTelegram(chatId, msgId, `✅ <b>Success!</b>\nOrder: ${orderId}\nStage: ${STAGE_NAMES[parseInt(stageId)]} is now <b>In Progress</b>.`);
         }
       }
-
-      // --- 2. WORKFLOW HUB HANDLERS ---
       else if (data === "menu_main") {
         const mainKeyboard = { inline_keyboard: [[{ text: "📋 List Orders", callback_data: "menu_list" }, { text: "📊 Stats", callback_data: "menu_stats" }]] };
         await editTelegram(chatId, msgId, "🏠 <b>Admin Dashboard</b>", mainKeyboard);
@@ -167,6 +167,10 @@ export async function POST(request: Request) {
         const [_, __, oId, sId] = data.split("_");
         const { text, keyboard } = await getStageDetail(supabase, oId, parseInt(sId));
         if (keyboard) await editTelegram(chatId, msgId, text, keyboard);
+      }
+      else if (data.startsWith("wf_prompt_budget_")) {
+        const [_, __, ___, oId, sId] = data.split("_");
+        await sendTelegram(chatId, `🔢 <b>Set Budget (Days) for ${STAGE_NAMES[parseInt(sId)]}</b>\nID: <code>${oId}</code>\n\nReply with a number (e.g., 5)`, { force_reply: true });
       }
       else if (data.startsWith("wf_update_")) {
         const [_, __, oId, sId, status] = data.split("_");
@@ -204,12 +208,6 @@ export async function POST(request: Request) {
         const prompt = `🚚 <b>Dispatching Order:</b> <code>${oId}</code>\n\nReply with:\n<code>Tracking # | Courier | DD-MM-YYYY</code>\n\nOr type <b>cancel</b>`;
         await sendTelegram(chatId, prompt, { force_reply: true, reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: `view_${oId}` }]] } });
       }
-      else if (data.startsWith("setstatus_")) {
-        const [_, oId, status] = data.split("_");
-        await supabase.from('sample_orders').update({ status }).eq('order_id', oId);
-        const { text, keyboard } = await getOrderDetail(supabase, oId);
-        await editTelegram(chatId, msgId, text, keyboard);
-      }
       else if (data.startsWith("attach_")) {
         const [_, orderId, mediaId] = data.split("_");
         const mediaMsg = cb.message.reply_to_message;
@@ -239,7 +237,6 @@ export async function POST(request: Request) {
     if (message.text) {
       const text = message.text;
 
-      // Handle Dispatch Reply
       if (message.reply_to_message?.text?.startsWith('🚚 Dispatching Order:')) {
         const oId = message.reply_to_message.text.match(/(TG-\d+|ORD-\d+|FAC-\d+|TASK-\d+)/)?.[0];
         if (text.toLowerCase() === 'cancel') { await sendTelegram(chatId, "❌ Dispatch cancelled."); return NextResponse.json({ ok: true }); }
@@ -248,19 +245,29 @@ export async function POST(request: Request) {
             const [tracking, courier, dateStr] = parts; const [d, m, y] = dateStr.split('-');
             await supabase.from('sample_orders').update({ status: 'dispatched', courier_name: courier, tracking_number: tracking, dispatched_at: new Date(`${y}-${m}-${d}`).toISOString() }).eq('order_id', oId);
             await sendTelegram(chatId, `✅ <b>Order ${oId} Dispatched</b>`);
-        } else {
-            await sendTelegram(chatId, "⚠️ Invalid format. Use: Tracking | Courier | DD-MM-YYYY", { force_reply: true });
+        } else { await sendTelegram(chatId, "⚠️ Invalid format. Use: Tracking | Courier | DD-MM-YYYY", { force_reply: true }); }
+        return NextResponse.json({ ok: true });
+      }
+
+      if (message.reply_to_message?.text?.includes('Set Budget (Days)')) {
+        const oId = message.reply_to_message.text.match(/(TG-\d+|ORD-\d+|TASK-\d+)/)?.[0];
+        const sName = message.reply_to_message.text.match(/for (.*)\n/)?.[1];
+        const sId = Object.keys(STAGE_NAMES).find(key => STAGE_NAMES[parseInt(key)] === sName);
+        if (oId && sId) {
+            const { data: order } = await supabase.from('sample_orders').select('production_workflow').eq('order_id', oId).single();
+            if (order) {
+                const wf = order.production_workflow || {};
+                wf[sId] = { ...(wf[sId] || {}), assignedDays: parseInt(text) || 0 };
+                await supabase.from('sample_orders').update({ production_workflow: wf }).eq('order_id', oId);
+                await sendTelegram(chatId, `✅ Budget set to ${text} days for ${sName}.`);
+            }
         }
         return NextResponse.json({ ok: true });
       }
 
-      // Handle Command: /assign or /task
       if (text.startsWith("/assign") || text.startsWith("/task")) {
         const mediaMsg = message.reply_to_message;
-        if (!mediaMsg || !(mediaMsg.photo || mediaMsg.video || mediaMsg.document)) {
-            await sendTelegram(chatId, "❌ Please reply to a media message with /assign");
-            return NextResponse.json({ ok: true });
-        }
+        if (!mediaMsg) { await sendTelegram(chatId, "❌ Please reply to a media message with /assign"); return NextResponse.json({ ok: true }); }
         const keyboard = { inline_keyboard: [[{ text: "🆕 Standalone Task", callback_data: `asgn_mode_${mediaMsg.message_id}_standalone` }], [{ text: "🔗 Associate to Order", callback_data: `asgn_mode_${mediaMsg.message_id}_associate` }]] };
         await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, { chat_id: chatId, text: "🛠 <b>Assignment Engine:</b>", parse_mode: 'HTML', reply_to_message_id: mediaMsg.message_id, reply_markup: keyboard });
       }
@@ -277,9 +284,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Excel Logic
     if (message.document && message.document.file_name?.endsWith('.xlsx')) {
-        const fileRes = await axios.get(`https://api.telegram.org/getFile?file_id=${message.document.file_id}`);
+        const fileRes = await axios.get(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${message.document.file_id}`);
         const response = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileRes.data.result.file_path}`, { responseType: 'arraybuffer' });
         const rows: any[] = XLSX.utils.sheet_to_json(XLSX.read(response.data, { type: 'buffer' }).Sheets[0]);
         const clientEmail = rows[0]?.client_email?.trim().toLowerCase();
