@@ -43,6 +43,7 @@ function calculateSpent(start: string, end?: string) {
 
 // --- UI GENERATORS ---
 async function getOrderList(supabase: any) {
+  // Orders only disappear when status is 'dispatched'. 'ready' orders stay in the list.
   const { data: orders } = await supabase.from('sample_orders').select('order_id, status, client:clients(name)').not('status', 'eq', 'dispatched').order('created_at', { ascending: false }).limit(15);
   if (!orders || orders.length === 0) return { text: "📋 <b>No active orders found.</b>", keyboard: { inline_keyboard: [[{ text: "⬅️ Back to Menu", callback_data: "menu_main" }]] } };
   const keyboard = { inline_keyboard: [...orders.map((o: any) => {
@@ -174,12 +175,17 @@ export async function POST(request: Request) {
       else if (data.startsWith("wf_reset_")) {
         const [_, __, oId, sId] = data.split("_");
         const stageNum = parseInt(sId);
-        const { data: order } = await supabase.from('sample_orders').select('production_workflow').eq('order_id', oId).single();
+        const { data: order } = await supabase.from('sample_orders').select('status, production_workflow').eq('order_id', oId).single();
         if (order) {
             const stages = order.production_workflow || {};
             stages[stageNum] = { ...stages[stageNum], status: 'pending', actualDate: null };
             if (stageNum < 5 && stages[stageNum + 1]) stages[stageNum + 1].startDate = null;
-            await supabase.from('sample_orders').update({ production_workflow: stages }).eq('order_id', oId);
+            
+            // Logic: If we reset stage 5, move order from 'ready' back to 'sampling_in_progress'
+            let newStatus = order.status;
+            if (stageNum === 5 && order.status === 'ready') newStatus = 'sampling_in_progress';
+
+            await supabase.from('sample_orders').update({ production_workflow: stages, status: newStatus }).eq('order_id', oId);
             const { text, keyboard } = await getStageDetail(supabase, oId, stageNum);
             if (keyboard) await editTelegram(chatId, msgId, text, keyboard);
         }
@@ -229,7 +235,7 @@ export async function POST(request: Request) {
             if (order) {
                 const wf = order.production_workflow || {};
                 wf[5] = { ...(wf[5] || { assignedDays: 0 }), status: 'completed', actualDate: mediaDate };
-                // Automation: Stage 5 complete AND Order ready
+                // Automation: Mark Stage 5 complete AND mark overall Order status as READY
                 await supabase.from('sample_orders').update({ production_workflow: wf, status: 'ready' }).eq('order_id', orderId);
             }
             await editTelegram(chatId, msgId, `✅ <b>Media Attached to ${orderId}</b>\n🏁 Overall Status: <b>READY</b>`);
@@ -249,7 +255,7 @@ export async function POST(request: Request) {
     if (message.text) {
       const text = message.text;
 
-      // STRICT Dispatch handling
+      // Handle Dispatch Reply
       if (message.reply_to_message?.text?.startsWith('🚚 Dispatching Order:')) {
         const oId = message.reply_to_message.text.match(/(TG-\d+|ORD-\d+)/)?.[0];
         if (text.toLowerCase() === 'cancel') {
@@ -288,7 +294,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // Excel Logic
     if (message.document && message.document.file_name?.endsWith('.xlsx')) {
         const fileRes = await axios.get(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${message.document.file_id}`);
         const response = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileRes.data.result.file_path}`, { responseType: 'arraybuffer' });
