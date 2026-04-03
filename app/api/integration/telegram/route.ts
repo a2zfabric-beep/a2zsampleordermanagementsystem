@@ -42,18 +42,29 @@ function calculateSpent(start: string, end?: string) {
 }
 
 // REPLACE WITH:
-
 // --- DROPBOX HELPERS ---
-const DROPBOX_TOKEN = process.env.DROPBOX_ACCESS_TOKEN;
+async function getDropboxAccessToken(): Promise<string> {
+  const res = await axios.post(
+    'https://api.dropbox.com/oauth2/token',
+    new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: process.env.DROPBOX_REFRESH_TOKEN!,
+      client_id: process.env.DROPBOX_APP_KEY!,
+      client_secret: process.env.DROPBOX_APP_SECRET!,
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+  return res.data.access_token;
+}
 
 async function dbxEnsureFolder(path: string) {
   try {
+    const token = await getDropboxAccessToken();
     await axios.post('https://api.dropboxapi.com/2/files/create_folder_v2',
       { path, autorename: false },
-      { headers: { Authorization: `Bearer ${DROPBOX_TOKEN}`, 'Content-Type': 'application/json' } }
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
     );
   } catch (err: any) {
-    // 409 = folder already exists — that's fine, ignore
     if (err.response?.status !== 409) {
       console.error('Dropbox folder error:', path, err.response?.data || err.message);
     }
@@ -62,11 +73,12 @@ async function dbxEnsureFolder(path: string) {
 
 async function dbxUploadFile(dropboxPath: string, fileBuffer: Buffer) {
   try {
+    const token = await getDropboxAccessToken();
     await axios.post('https://content.dropboxapi.com/2/files/upload',
       fileBuffer,
       {
         headers: {
-          Authorization: `Bearer ${DROPBOX_TOKEN}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/octet-stream',
           'Dropbox-API-Arg': JSON.stringify({ path: dropboxPath, mode: 'add', autorename: true, mute: false }),
         }
@@ -76,7 +88,6 @@ async function dbxUploadFile(dropboxPath: string, fileBuffer: Buffer) {
     console.error('Dropbox upload error:', dropboxPath, err.response?.data || err.message);
   }
 }
-
 async function ensureTaggingFolders(sessionType: string, clientName: string, orderId: string, styleName: string) {
   const root = `/${sessionType === 'sample' ? 'Sample Approved' : 'Production Pieces'}`;
   const clientPath = `${root}/${clientName}`;
