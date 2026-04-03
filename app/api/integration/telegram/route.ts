@@ -551,14 +551,22 @@ export async function POST(request: Request) {
       }
 
       // --- 2. SESSION STYLE NAME INPUT ---
-      // REPLACE WITH:
+   
       if (session && session.current_field === "WAITING_FOR_STYLE_NAME") {
         if (text.toLowerCase() === 'cancel') {
           await supabase.from('tagging_sessions').delete().eq('user_id', userId);
           await sendTelegram(chatId, "❌ Session cancelled.");
+        // REPLACE WITH:
         } else {
           const fields = await getMeasurementTemplate(supabase, session.garment_type);
-          // Now style name is known — create Dropbox folders
+          await supabase.from('debug_log').insert([{ context: 'style_name_input', payload: { 
+            client_name: session.client_name, 
+            dropbox_order_id: session.dropbox_order_id,
+            temp_entry_id: session.temp_entry_id,
+            order_id: session.order_id,
+            session_type: session.session_type,
+            style_name_entered: text
+          }}]);
           await ensureTaggingFolders(
             session.session_type,
             session.client_name || session.client_id,
