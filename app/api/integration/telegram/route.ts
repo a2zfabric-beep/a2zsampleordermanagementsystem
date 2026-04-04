@@ -408,21 +408,31 @@ export async function POST(request: Request) {
           { inline_keyboard: [[{ text: "⬅️ Menu", callback_data: "menu_main" }]] }
         );
       }
-      // --- TASK COMPLETE via /complete command ---
-      else if (data.startsWith("task_done_")) {
-        const taskId = data.replace("task_done_", "");
-        // Use the original replied-to message date (stored in bot message text), fallback to now
-        const mediaMsg = cb.message.reply_to_message;
-        const completionDate = mediaMsg
-          ? new Date(mediaMsg.date * 1000).toISOString()
-          : new Date().toISOString();
-        const fileId = mediaMsg?.photo
-          ? mediaMsg.photo[mediaMsg.photo.length - 1].file_id
-          : mediaMsg?.video?.file_id || mediaMsg?.document?.file_id || null;
-
+      // --- TASK: view detail before completing ---
+      else if (data.startsWith("task_view_")) {
+        const taskId = data.replace("task_view_", "");
         const { data: task } = await supabase.from('tasks').select('*').eq('task_id', taskId).single();
         if (task) {
-          await supabase.from('tasks').update({ status: 'completed', completion_date: completionDate, completion_file_id: fileId }).eq('task_id', taskId);
+          const startStr = task.start_date ? new Date(task.start_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A';
+          const dueStr = task.completion_date ? new Date(task.completion_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Not set';
+          await editTelegram(chatId, msgId,
+            `📋 <b>Task Detail</b>\n🆔 <code>${taskId}</code>\n👤 ${task.assigned_to || 'N/A'}\n📝 ${task.description || task.title || 'N/A'}\n📅 Started: ${startStr}\n🏁 Due: ${dueStr}`,
+            { inline_keyboard: [
+              [{ text: `✅ Complete — Today`, callback_data: `task_done_today_${taskId}` }],
+              [{ text: `📅 Complete — Enter Date`, callback_data: `task_done_pickdate_${taskId}` }],
+              [{ text: `⬅️ Back`, callback_data: `task_back_list` }]
+            ]}
+          );
+        }
+      }
+
+      // --- TASK: mark complete with today's date ---
+      else if (data.startsWith("task_done_today_")) {
+        const taskId = data.replace("task_done_today_", "");
+        const completionDate = new Date().toISOString();
+        const { data: task } = await supabase.from('tasks').select('*').eq('task_id', taskId).single();
+        if (task) {
+          await supabase.from('tasks').update({ status: 'completed', completion_date: completionDate }).eq('task_id', taskId);
           if (task.order_id && task.stage_id) {
             const { data: order } = await supabase.from('sample_orders').select('production_workflow').eq('order_id', task.order_id).single();
             if (order) {
@@ -436,6 +446,28 @@ export async function POST(request: Request) {
             { inline_keyboard: [[{ text: "⬅️ Menu", callback_data: "menu_main" }]] }
           );
         }
+      }
+
+      // --- TASK: prompt for manual completion date ---
+      else if (data.startsWith("task_done_pickdate_")) {
+        const taskId = data.replace("task_done_pickdate_", "");
+        await sendTelegram(chatId,
+          `📅 <b>Enter completion date</b> for <code>${taskId}</code>\n\nReply with: <code>DD-MM-YYYY</code>\n\n[TASK_COMPDATE:${taskId}]`,
+          { force_reply: true }
+        );
+      }
+
+      // --- TASK: back to pending list ---
+      else if (data === "task_back_list") {
+        const { data: tasks } = await supabase.from('tasks').select('*').eq('status', 'pending').order('created_at', { ascending: false });
+        if (!tasks || tasks.length === 0) { await editTelegram(chatId, msgId, "✅ No pending tasks found.", { inline_keyboard: [[{ text: "⬅️ Menu", callback_data: "menu_main" }]] }); return NextResponse.json({ ok: true }); }
+        const buttons = tasks.map((t: any) => ([{
+          text: t.is_standalone
+            ? `🆕 ${t.assigned_to || 'N/A'} | ${(t.description || t.title || t.task_id).substring(0, 35)}`
+            : `📦 ${t.order_id} | ${t.stage_name}`,
+          callback_data: `task_view_${t.task_id}`
+        }]));
+        await editTelegram(chatId, msgId, `🏁 <b>Select task to complete:</b>`, { inline_keyboard: buttons });
       }
       // --- STANDALONE TASK: set date prompt ---
       else if (data.startsWith("stask_setdate_")) {
@@ -848,6 +880,34 @@ export async function POST(request: Request) {
         );
         return NextResponse.json({ ok: true });
       }
+      // --- TASK: manual completion date reply handler ---
+      if (message.reply_to_message?.text?.includes('[TASK_COMPDATE:')) {
+        const replyText = message.reply_to_message.text;
+        const match = replyText.match(/\[TASK_COMPDATE:(TASK-\d+)\]/);
+        if (!match) return NextResponse.json({ ok: true });
+        const taskId = match[1];
+        const dateMatch = text.trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+        if (!dateMatch) { await sendTelegram(chatId, `⚠️ Use DD-MM-YYYY format.`, { force_reply: true }); return NextResponse.json({ ok: true }); }
+        const [_, d, m, y] = dateMatch;
+        const completionDate = new Date(`${y}-${m}-${d}T00:00:00.000Z`).toISOString();
+        const { data: task } = await supabase.from('tasks').select('*').eq('task_id', taskId).single();
+        if (task) {
+          await supabase.from('tasks').update({ status: 'completed', completion_date: completionDate }).eq('task_id', taskId);
+          if (task.order_id && task.stage_id) {
+            const { data: order } = await supabase.from('sample_orders').select('production_workflow').eq('order_id', task.order_id).single();
+            if (order) {
+              const wf = order.production_workflow || {};
+              wf[task.stage_id] = { ...wf[task.stage_id], status: 'completed', actualDate: completionDate };
+              await supabase.from('sample_orders').update({ production_workflow: wf }).eq('order_id', task.order_id);
+            }
+          }
+          await sendTelegram(chatId,
+            `✅ <b>Task Completed!</b>\n🆔 <code>${taskId}</code>\n👤 ${task.assigned_to || ''}\n📋 ${task.description || task.title || ''}\n📅 Done: ${new Date(completionDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`
+          );
+        }
+        return NextResponse.json({ ok: true });
+      }
+
       // --- STANDALONE TASK: manual date reply handler ---
       if (message.reply_to_message?.text?.includes('[STASK_DATE:')) {
         const replyText = message.reply_to_message.text;
@@ -880,25 +940,16 @@ export async function POST(request: Request) {
           [{ text: "🔗 Link to Client & Order", callback_data: `asgn_mode_${mediaMsg.message_id}_associate` }]
         ]};
         await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, { chat_id: chatId, text: `🛠 <b>Create Task</b>\n📅 Start date will be: <b>${mediaDate}</b>`, parse_mode: 'HTML', reply_to_message_id: mediaMsg.message_id, reply_markup: keyboard });
-      }else if (text.startsWith("/complete")) {
-        const mediaMsg = message.reply_to_message;
-        if (!mediaMsg) { await sendTelegram(chatId, "❌ Reply to a photo, video, or text message with /complete."); return NextResponse.json({ ok: true }); }
+      } else if (text.startsWith("/complete")) {
         const { data: tasks } = await supabase.from('tasks').select('*').eq('status', 'pending').order('created_at', { ascending: false });
         if (!tasks || tasks.length === 0) { await sendTelegram(chatId, "✅ No pending tasks found."); return NextResponse.json({ ok: true }); }
-        const completionDate = new Date(mediaMsg.date * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
         const buttons = tasks.map((t: any) => ([{
           text: t.is_standalone
-            ? `🆕 ${t.assigned_to || ''} | ${(t.description || t.title || t.task_id).substring(0, 30)}`
+            ? `🆕 ${t.assigned_to || 'N/A'} | ${(t.description || t.title || t.task_id).substring(0, 35)}`
             : `📦 ${t.order_id} | ${t.stage_name}`,
-          callback_data: `task_done_${t.task_id}`
+          callback_data: `task_view_${t.task_id}`
         }]));
-        await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-          chat_id: chatId,
-          text: `🏁 <b>Mark Task Complete</b>\n📅 Completion date: <b>${completionDate}</b>\n\nSelect task:`,
-          parse_mode: 'HTML',
-          reply_to_message_id: mediaMsg.message_id,
-          reply_markup: { inline_keyboard: buttons }
-        });
+        await sendTelegram(chatId, `🏁 <b>Select task to complete:</b>`, { inline_keyboard: buttons });
       }
       else if (text.startsWith("/tag")) {
         const mediaMsg = message.reply_to_message;
