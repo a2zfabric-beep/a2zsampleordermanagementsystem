@@ -340,9 +340,10 @@ export async function POST(request: Request) {
           const fileId = cb.message.reply_to_message?.photo
             ? cb.message.reply_to_message.photo[cb.message.reply_to_message.photo.length - 1].file_id
             : cb.message.reply_to_message?.video?.file_id || cb.message.reply_to_message?.document?.file_id || null;
+          const staskToken = `STASK-${Buffer.from(mediaDate).toString('base64').replace(/=/g, '')}-FID-${fileId || 'null'}`;
           await sendTelegram(
             chatId,
-            `🆕 <b>Standalone Task</b>\n📅 Start: <b>${startDateDisplay}</b>\n\nReply with:\n<code>Assign To | Nature of Task</code>\n\n<i>Example: Rahul | Stitching of sample batch</i>\n\nType <b>cancel</b> to abort.\n\n__STASK__${mediaDate}__${fileId || ''}__`,
+            `🆕 <b>Standalone Task</b>\n📅 Start: <b>${startDateDisplay}</b>\n\nReply with:\n<code>Assign To | Nature of Task</code>\n\n<i>Example: Rahul | Stitching of sample batch</i>\n\nType <b>cancel</b> to abort.\n\n[${staskToken}]`,
             { force_reply: true }
           );
         } else {
@@ -484,7 +485,7 @@ export async function POST(request: Request) {
             response += "🆕 <b>Standalone Tasks:</b>\n";
             standalone.forEach((t: any) => {
               const startStr = t.start_date ? new Date(t.start_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : 'N/A';
-              response += `🆔 ${t.task_id} | 📅 ${startStr}\n\n`;
+              response += `🆔 ${t.task_id}\n👤 ${t.assigned_to || 'N/A'} | 📋 ${t.description || t.title || 'N/A'}\n📅 ${startStr}\n\n`;
             });
           }
         }
@@ -772,15 +773,19 @@ export async function POST(request: Request) {
       }
 
       // --- STANDALONE TASK: details reply handler ---
-      if (message.reply_to_message?.text?.includes('__STASK__')) {
+      if (message.reply_to_message?.text?.includes('[STASK-')) {
         const replyText = message.reply_to_message.text;
         if (text.toLowerCase() === 'cancel') {
           await sendTelegram(chatId, "❌ Standalone task cancelled.");
           return NextResponse.json({ ok: true });
         }
-        const staskMatch = replyText.match(/__STASK__([^_]+(?:T[^_]+)?)__([^_]*)__/);
-        const mediaDate = staskMatch?.[1] || new Date().toISOString();
-        const fileId = staskMatch?.[2] || null;
+        const staskMatch = replyText.match(/\[STASK-([A-Za-z0-9+/]+)-FID-([^\]]+)\]/);
+        let mediaDate = new Date().toISOString();
+        let fileId: string | null = null;
+        if (staskMatch) {
+          try { mediaDate = Buffer.from(staskMatch[1], 'base64').toString('utf8'); } catch {}
+          fileId = staskMatch[2] === 'null' ? null : staskMatch[2];
+        }
 
         const parts = text.split('|').map((p: string) => p.trim());
         if (parts.length < 2 || !parts[0] || !parts[1]) {
