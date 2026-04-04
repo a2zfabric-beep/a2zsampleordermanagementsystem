@@ -485,7 +485,14 @@ export async function POST(request: Request) {
             response += "🆕 <b>Standalone Tasks:</b>\n";
             standalone.forEach((t: any) => {
               const startStr = t.start_date ? new Date(t.start_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : 'N/A';
-              response += `🆔 ${t.task_id}\n👤 ${t.assigned_to || 'N/A'} | 📋 ${t.description || t.title || 'N/A'}\n📅 ${startStr}\n\n`;
+              let dueLine = '';
+              if (t.completion_date) {
+                const diff = Math.ceil((new Date(t.completion_date).getTime() - new Date().setHours(0,0,0,0)) / 86400000);
+                if (diff > 0) dueLine = `\n✅ ${diff}d left`;
+                else if (diff === 0) dueLine = `\n⚠️ Due today`;
+                else dueLine = `\n🔴 ${Math.abs(diff)}d overdue`;
+              }
+              response += `🆔 ${t.task_id}\n👤 ${t.assigned_to || 'N/A'} | 📋 ${t.description || t.title || 'N/A'}\n📅 Started: ${startStr}${dueLine}\n\n`;
             });
           }
         }
@@ -839,7 +846,10 @@ export async function POST(request: Request) {
       // --- 5. WORKFLOW HANDLERS ---
       if (text.startsWith("/assign") || text.startsWith("/task")) {
         const mediaMsg = message.reply_to_message;
-        if (!mediaMsg) { await sendTelegram(chatId, "❌ Reply to a photo/video with /assign to create a task."); return NextResponse.json({ ok: true }); }
+        if (!mediaMsg) { await sendTelegram(chatId, "❌ Reply to a photo, video, or text message with /assign to create a task."); return NextResponse.json({ ok: true }); }
+        const isMedia = !!(mediaMsg.photo || mediaMsg.video || mediaMsg.document);
+        const isText = !!mediaMsg.text;
+        if (!isMedia && !isText) { await sendTelegram(chatId, "❌ Reply to a photo, video, or text message with /assign."); return NextResponse.json({ ok: true }); }
         const mediaDate = new Date(mediaMsg.date * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
         const keyboard = { inline_keyboard: [
           [{ text: "🆕 Standalone Task", callback_data: `asgn_mode_${mediaMsg.message_id}_standalone` }],
