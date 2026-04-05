@@ -1024,13 +1024,31 @@ export async function POST(request: Request) {
                 client = nc;
             }
             const orderId = `TG-${Math.floor(1000 + Math.random() * 9000)}`;
-            const initialWF = { 5: { status: 'in_progress', assignedDays: 7, startDate: new Date().toISOString() } };
+            const initialWF = {
+  1: { status: 'pending', assignedDays: 0 },
+  2: { status: 'pending', assignedDays: 0 },
+  3: { status: 'pending', assignedDays: 0 },
+  4: { status: 'pending', assignedDays: 0 },
+  5: { status: 'in_progress', assignedDays: 7, startDate: new Date().toISOString() },
+};
             const { data: order, error: orderErr } = await supabase.from('sample_orders').insert([{ client_id: client?.id, order_id: orderId, status: 'submitted', production_workflow: initialWF, created_by: 'automation' }]).select().single();
             if (orderErr || !order) {
                 await sendTelegram(chatId, `❌ <b>Order creation failed</b>\n\n<code>${orderErr?.message || 'Unknown error'}</code>`);
             } else {
                 const styles = rows.filter((r: any) => r.style_name);
-                await supabase.from('order_styles').insert(styles.map((r: any) => ({ order_id: order.id, style_name: r.style_name, quantity: r.quantity })));
+                await supabase.from('order_styles').insert(styles.map((r: any) => ({
+  order_id: order.id,
+  style_name: r.style_name,
+  quantity: r.quantity ? parseInt(r.quantity) : null,
+  item_number: r.item_number || null,
+  style_number: r.style_number || null,
+  print_type: r.print_type || null,
+  color_name: r.color_name || null,
+  pantone_number: r.pantone_number || null,
+  design_name: r.design_name || null,
+  fabric: r.fabric || null,
+  notes: r.notes || null,
+})));
                 const styleLines = styles.map((r: any) => `  • ${r.style_name} — ${r.quantity || 'N/A'} pcs`).join('\n');
                 const clientLabel = client?.name || rows[0].client_name || rows[0].client_email;
                 await sendTelegram(chatId,
