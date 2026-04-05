@@ -1025,7 +1025,7 @@ export async function POST(request: Request) {
             }
             const orderId = `TG-${Math.floor(1000 + Math.random() * 9000)}`;
             const initialWF = { 5: { status: 'in_progress', assignedDays: 7, startDate: new Date().toISOString() } };
-            const { data: order, error: orderErr } = await supabase.from('sample_orders').insert([{ client_id: client?.id, order_id: orderId, status: 'submitted', production_workflow: initialWF, created_by: process.env.SUPABASE_ADMIN_USER_ID }]).select().single();
+            const { data: order, error: orderErr } = await supabase.from('sample_orders').insert([{ client_id: client?.id, order_id: orderId, status: 'submitted', production_workflow: initialWF, created_by: 'telegram_bot' }]).select().single();
             if (orderErr || !order) {
                 await sendTelegram(chatId, `❌ <b>Order creation failed</b>\n\n<code>${orderErr?.message || 'Unknown error'}</code>`);
             } else {
