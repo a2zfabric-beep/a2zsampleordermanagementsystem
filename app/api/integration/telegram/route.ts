@@ -1036,19 +1036,20 @@ export async function POST(request: Request) {
                 await sendTelegram(chatId, `❌ <b>Order creation failed</b>\n\n<code>${orderErr?.message || 'Unknown error'}</code>`);
             } else {
                 const styles = rows.filter((r: any) => r.style_name);
-                await supabase.from('order_styles').insert(styles.map((r: any) => ({
+                const { error: stylesErr } = await supabase.from('order_styles').insert(styles.map((r: any) => ({
   order_id: order.id,
-  style_name: r.style_name,
-  quantity: r.quantity ? parseInt(r.quantity) : null,
-  item_number: r.item_number || null,
+  style_name: r.style_name || 'Unnamed Style',
+  quantity: r.quantity ? parseInt(r.quantity) : 1,
+  item_number: r.item_number || r.style_number || `ITEM-${Math.floor(1000 + Math.random() * 9000)}`,
   style_number: r.style_number || null,
-  print_type: r.print_type || null,
+  print_type: r.print_type === 'printed' ? 'printed' : 'solid_dyed',
   color_name: r.color_name || null,
   pantone_number: r.pantone_number || null,
   design_name: r.design_name || null,
   fabric: r.fabric || null,
   notes: r.notes || null,
 })));
+if (stylesErr) console.error('Styles insert error:', stylesErr.message);
                 const styleLines = styles.map((r: any) => `  • ${r.style_name} — ${r.quantity || 'N/A'} pcs`).join('\n');
                 const clientLabel = client?.name || rows[0].client_name || rows[0].client_email;
                 await sendTelegram(chatId,
