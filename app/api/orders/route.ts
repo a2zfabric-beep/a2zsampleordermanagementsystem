@@ -164,27 +164,52 @@ export async function POST(request: Request) {
     const supabase = createSupabaseDirect(supabaseUrl, supabaseKey);
 
     const body = await request.json();
-    const { client_id, styles } = body;
+    const { client_id, new_client_name, new_client_email, styles } = body;
 
-    // 2. VERIFY CLIENT EXISTS
-    const { data: client, error: clientError } = await supabase
-      .from('clients')
-      .select('id')
-      .eq('id', client_id)
-      .single();
+    let resolvedClientId = client_id;
 
-    if (clientError || !client) {
-      return NextResponse.json({ 
-        success: false, 
-        error: `Client ID ${client_id} not found.` 
-      }, { status: 404 });
+    if (!client_id) {
+      // Auto-create or find client by email
+      if (!new_client_name || !new_client_email) {
+        return NextResponse.json({ success: false, error: 'Client name and email are required to create a new client.' }, { status: 400 });
+      }
+      // Check if client already exists by email
+      const { data: existing } = await supabase
+        .from('clients')
+        .select('id')
+        .eq('email', new_client_email.trim())
+        .single();
+
+      if (existing) {
+        resolvedClientId = existing.id;
+      } else {
+        const { data: newClient, error: createErr } = await supabase
+          .from('clients')
+          .insert([{ name: new_client_name.trim(), email: new_client_email.trim() }])
+          .select()
+          .single();
+        if (createErr || !newClient) {
+          return NextResponse.json({ success: false, error: `Failed to create client: ${createErr?.message}` }, { status: 500 });
+        }
+        resolvedClientId = newClient.id;
+      }
+    } else {
+      // Verify existing client
+      const { data: client, error: clientError } = await supabase
+        .from('clients')
+        .select('id')
+        .eq('id', client_id)
+        .single();
+      if (clientError || !client) {
+        return NextResponse.json({ success: false, error: `Client ID ${client_id} not found.` }, { status: 404 });
+      }
     }
 
     // 3. CREATE THE MAIN ORDER
     const { data: order, error: orderError } = await supabase
       .from('sample_orders')
       .insert([{
-        client_id: client_id,
+        client_id: resolvedClientId,
         status: 'draft',
         order_id: `ORD-${Math.floor(1000 + Math.random() * 10000)}`,
         priority: 'medium',

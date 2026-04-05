@@ -21,6 +21,9 @@ export default function OrderModal({ isOpen, onClose }: { isOpen: boolean, onClo
   const [clients, setClients] = useState<any[]>([]);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [deliveryDate, setDeliveryDate] = useState(''); // New state
+
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientEmail, setNewClientEmail] = useState('');
   
   const [styles, setStyles] = useState<StyleEntry[]>([{
     id: Math.random().toString(36).substr(2, 9),
@@ -100,15 +103,17 @@ export default function OrderModal({ isOpen, onClose }: { isOpen: boolean, onClo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedClientId) {
-      alert("Please select a client.");
+    if (!selectedClientId && (!newClientName.trim() || !newClientEmail.trim())) {
+      alert("Please select an existing client or enter a name and email for a new client.");
       return;
     }
     setLoading(true);
 
     try {
       const payload = {
-        client_id: parseInt(selectedClientId),
+        client_id: selectedClientId ? parseInt(selectedClientId) : null,
+        new_client_name: !selectedClientId ? newClientName.trim() : null,
+        new_client_email: !selectedClientId ? newClientEmail.trim() : null,
         delivery_date: deliveryDate || null, // Include delivery date here
         styles: styles.map(s => ({
           style_name: s.style_name.trim(),
@@ -151,21 +156,37 @@ export default function OrderModal({ isOpen, onClose }: { isOpen: boolean, onClo
         
         {/* CLIENT & DATE SELECTION */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-3">
-            <label className="text-[11px] font-black text-gray-900 uppercase tracking-[0.15em] ml-1">Select Client *</label>
-            <div className="relative">
-              <select 
-                className="w-full h-14 px-5 bg-white border-2 border-gray-100 rounded-2xl appearance-none focus:border-blue-600 outline-none transition-all font-bold text-gray-700"
-                value={selectedClientId}
-                onChange={e => setSelectedClientId(e.target.value)}
-                required
-              >
-                <option value="">Choose a client...</option>
-                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <ChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} />
-            </div>
-          </div>
+  <div className="space-y-3">
+    <label className="text-[11px] font-black text-gray-900 uppercase tracking-[0.15em] ml-1">Select Client *</label>
+    <div className="relative">
+      <select 
+        className="w-full h-14 px-5 bg-white border-2 border-gray-100 rounded-2xl appearance-none focus:border-blue-600 outline-none transition-all font-bold text-gray-700"
+        value={selectedClientId}
+        onChange={e => setSelectedClientId(e.target.value)}
+      >
+        <option value="">— Create New Client —</option>
+        {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <ChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} />
+    </div>
+    {!selectedClientId && (
+      <div className="space-y-2 pt-1">
+        <input
+          className="w-full h-12 px-4 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl focus:border-blue-600 outline-none font-bold text-sm"
+          placeholder="New client name *"
+          value={newClientName}
+          onChange={e => setNewClientName(e.target.value)}
+        />
+        <input
+          className="w-full h-12 px-4 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl focus:border-blue-600 outline-none font-bold text-sm"
+          placeholder="New client email *"
+          type="email"
+          value={newClientEmail}
+          onChange={e => setNewClientEmail(e.target.value)}
+        />
+      </div>
+    )}
+  </div>
 
           <div className="space-y-3">
             <label className="text-[11px] font-black text-gray-900 uppercase tracking-[0.15em] ml-1">Target Delivery Date</label>
