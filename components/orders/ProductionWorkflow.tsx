@@ -11,14 +11,22 @@ export default function ProductionWorkflow({ order }: { order: any }) {
   const [expandedStage, setExpandedStage] = useState<number | null>(1);
   const [isSaving, setIsSaving] = useState(false);
 
-  const [stages, setStages] = useState<Record<number, any>>(
-    order.production_workflow || {
-      1: { status: 'pending', assignedDays: 0, startDate: order?.created_at },
-      2: { status: 'pending', assignedDays: 0 },
-      3: { status: 'pending', assignedDays: 0 },
-      4: { status: 'pending', assignedDays: 0 },
-      5: { status: 'pending', assignedDays: 0 },
+  const defaultStages = {
+    1: { status: 'pending', assignedDays: 0, startDate: order?.created_at },
+    2: { status: 'pending', assignedDays: 0 },
+    3: { status: 'pending', assignedDays: 0 },
+    4: { status: 'pending', assignedDays: 0 },
+    5: { status: 'pending', assignedDays: 0 },
+  };
+  const normaliseStages = (wf: any) => {
+    const result: Record<number, any> = {};
+    for (let i = 1; i <= 5; i++) {
+      result[i] = { ...defaultStages[i as keyof typeof defaultStages], ...(wf?.[i] || {}) };
     }
+    return result;
+  };
+  const [stages, setStages] = useState<Record<number, any>>(
+    normaliseStages(order.production_workflow)
   );
 
   const [fabricRows, setFabricRows] = useState<any[]>([]);
