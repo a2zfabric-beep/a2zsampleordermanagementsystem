@@ -238,6 +238,10 @@ export async function DELETE(
   try {
     const { id } = await params;
     const orderId = parseInt(id);
+    console.log('DELETE called with raw id:', id, '→ parsed orderId:', orderId);
+    if (isNaN(orderId)) {
+      return NextResponse.json({ success: false, error: 'Invalid order ID — received: ' + id }, { status: 400 });
+    }
     const supabaseAdmin = getSupabaseAdmin();
 
     const { error } = await supabaseAdmin
