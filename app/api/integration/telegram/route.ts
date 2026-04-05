@@ -1020,12 +1020,25 @@ export async function POST(request: Request) {
             let { data: client } = await supabase.from('clients').select('id, name').eq('email', rows[0].client_email).eq('is_deleted', false).single();
             const isNewClient = !client;
             if (!client) {
-    const { data: nc, error: clientErr } = await supabase.from('clients').insert([{ name: rows[0].client_name, email: rows[0].client_email }]).select().single();
-    if (clientErr || !nc) {
-        await sendTelegram(chatId, `❌ <b>Failed to create client</b>\n\n<code>${clientErr?.message || 'Unknown error'}</code>`);
-        return NextResponse.json({ ok: true });
+    // Check if client exists but is deleted — restore instead of inserting
+    const { data: deleted } = await supabase.from('clients').select('id, name').eq('email', rows[0].client_email).single();
+    if (deleted) {
+        // Restore deleted client
+        const { data: restored } = await supabase.from('clients')
+            .update({ is_deleted: false, name: rows[0].client_name })
+            .eq('id', deleted.id).select().single();
+        client = restored;
+    } else {
+        // Truly new client
+        const { data: nc, error: clientErr } = await supabase.from('clients')
+            .insert([{ name: rows[0].client_name, email: rows[0].client_email }])
+            .select().single();
+        if (clientErr || !nc) {
+            await sendTelegram(chatId, `❌ <b>Failed to create client</b>\n\n<code>${clientErr?.message || 'Unknown error'}</code>`);
+            return NextResponse.json({ ok: true });
+        }
+        client = nc;
     }
-    client = nc;
 }
             const orderId = `TG-${Math.floor(1000 + Math.random() * 9000)}`;
             const initialWF = {
