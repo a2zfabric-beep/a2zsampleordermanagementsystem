@@ -1029,7 +1029,7 @@ export async function POST(request: Request) {
   2: { status: 'pending', assignedDays: 0 },
   3: { status: 'pending', assignedDays: 0 },
   4: { status: 'pending', assignedDays: 0 },
-  5: { status: 'in_progress', assignedDays: 7, startDate: new Date().toISOString() },
+  5: { status: 'pending', assignedDays: 0 },
 };
             const { data: order, error: orderErr } = await supabase.from('sample_orders').insert([{ client_id: client?.id, order_id: orderId, status: 'submitted', production_workflow: initialWF, created_by: 'automation' }]).select().single();
             if (orderErr || !order) {
