@@ -1017,12 +1017,16 @@ export async function POST(request: Request) {
         } else if (!rows[0]?.client_email) {
             await sendTelegram(chatId, `⚠️ <b>Excel Import Failed</b>\n\nMissing required field: <code>client_email</code>\n\nRequired columns: <code>client_email</code>, <code>client_name</code>, <code>style_name</code>, <code>quantity</code>`);
         } else {
-            let { data: client } = await supabase.from('clients').select('id, name').eq('email', rows[0].client_email).single();
+            let { data: client } = await supabase.from('clients').select('id, name').eq('email', rows[0].client_email).eq('is_deleted', false).single();
             const isNewClient = !client;
             if (!client) {
-                const { data: nc } = await supabase.from('clients').insert([{ name: rows[0].client_name, email: rows[0].client_email }]).select().single();
-                client = nc;
-            }
+    const { data: nc, error: clientErr } = await supabase.from('clients').insert([{ name: rows[0].client_name, email: rows[0].client_email }]).select().single();
+    if (clientErr || !nc) {
+        await sendTelegram(chatId, `❌ <b>Failed to create client</b>\n\n<code>${clientErr?.message || 'Unknown error'}</code>`);
+        return NextResponse.json({ ok: true });
+    }
+    client = nc;
+}
             const orderId = `TG-${Math.floor(1000 + Math.random() * 9000)}`;
             const initialWF = {
   1: { status: 'pending', assignedDays: 0 },
