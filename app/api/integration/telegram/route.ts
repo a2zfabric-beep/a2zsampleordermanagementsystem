@@ -131,7 +131,7 @@ function generateMeasurementKeyboard(session: any) {
 
 // --- UI GENERATORS ---
 async function getOrderList(supabase: any) {
-  const { data: orders } = await supabase.from('sample_orders').select('order_id, status, client:clients(name)').not('status', 'eq', 'dispatched').order('created_at', { ascending: false }).limit(15);
+  const { data: orders } = await supabase.from('sample_orders').select('order_id, status, client:clients(name)').not('status', 'eq', 'dispatched').eq('is_deleted', false).order('created_at', { ascending: false }).limit(15);
   if (!orders || orders.length === 0) return { text: "📋 <b>No active orders found.</b>", keyboard: { inline_keyboard: [[{ text: "⬅️ Back to Menu", callback_data: "menu_main" }]] } };
   const keyboard = { inline_keyboard: [...orders.map((o: any) => ([{ text: `${o.order_id} | ${o.client?.name || 'Client'} (${o.status})`, callback_data: `view_${o.order_id}` }])), [{ text: "⬅️ Back to Menu", callback_data: "menu_main" }]] };
   return { text: "📋 <b>Active Orders List:</b>", keyboard };
