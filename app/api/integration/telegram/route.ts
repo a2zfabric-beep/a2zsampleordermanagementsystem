@@ -538,7 +538,7 @@ export async function POST(request: Request) {
         const standalone = (tasks || []).filter((t: any) => t.is_standalone);
 
         if (standalone.length > 0) {
-          response += "🆕 <b>Standalone Tasks:</b>\n";
+          response += "🆕 <b>Standalone Tasks — tap below to complete:</b>\n";
           standalone.forEach((t: any) => {
             const startStr = t.start_date ? new Date(t.start_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : 'N/A';
             let dueLine = '📅 No due date set';
@@ -583,7 +583,14 @@ export async function POST(request: Request) {
         }
 
         if (standalone.length === 0 && linked.length === 0 && response === "⏳ <b>Pending Tasks</b>\n\n") response += "✅ All clear — no pending tasks.";
-        await editTelegram(chatId, msgId, response, { inline_keyboard: [[{ text: "⬅️ Back", callback_data: "menu_main" }]] });
+        const taskButtons = (tasks || []).map((t: any) => ([{
+          text: t.is_standalone
+            ? `🆕 ${t.assigned_to || 'N/A'} | ${(t.description || t.title || t.task_id).substring(0, 30)}`
+            : `📦 ${t.order_id} | ${t.stage_name}`,
+          callback_data: `task_view_${t.task_id}_ts_0`
+        }]));
+        taskButtons.push([{ text: "⬅️ Back to Menu", callback_data: "menu_main" }]);
+        await editTelegram(chatId, msgId, response, { inline_keyboard: taskButtons });
       }
       else if (data === "menu_list") {
         const { text, keyboard } = await getOrderList(supabase);
