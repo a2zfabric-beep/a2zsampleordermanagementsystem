@@ -183,16 +183,21 @@ async function getStageDetail(supabase: any, orderId: string, stageId: number) {
   let text = `🏗️ <b>${STAGE_NAMES[stageId]}</b>\nID: <code>${orderId}</code>\n\n📌 Status: <b>${s.status.toUpperCase()}</b>\n📅 Start Date: ${startDisplay}\n🏁 Completion Date: ${endDisplay}\n⏱ Budget: ${s.assignedDays} Days\n`;
   if (s.startDate) text += `⏳ Used So Far: ${calculateSpent(s.startDate, s.status === 'completed' ? s.actualDate : undefined)} Days\n`;
 
-  const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const buttons: any[][] = [];
 
-  const buttons = [
-    [{ text: "✅ Mark Completed (Today)", callback_data: `wf_update_${orderId}_${stageId}_completed` }],
-    [{ text: "📅 Set Start Date", callback_data: `wf_prompt_date_${orderId}_${stageId}_start` }],
-    [{ text: "🏁 Set Completion Date", callback_data: `wf_prompt_date_${orderId}_${stageId}_end` }],
-    [{ text: "⏱ Set Budget Days", callback_data: `wf_prompt_budget_${orderId}_${stageId}` }],
-    [{ text: "🔄 Reset Stage", callback_data: `wf_reset_${orderId}_${stageId}` }],
-    [{ text: "⬅️ Back to Workflow Hub", callback_data: `wf_hub_${orderId}` }]
-  ];
+  if (s.status === 'pending') {
+    buttons.push([{ text: "▶️ Start Stage (Today)", callback_data: `wf_start_${orderId}_${stageId}` }]);
+    buttons.push([{ text: "📅 Set Start Date", callback_data: `wf_prompt_date_${orderId}_${stageId}_start` }]);
+    buttons.push([{ text: "⏱ Set Budget Days", callback_data: `wf_prompt_budget_${orderId}_${stageId}` }]);
+  } else {
+    buttons.push([{ text: "✅ Mark Completed (Today)", callback_data: `wf_update_${orderId}_${stageId}_completed` }]);
+    buttons.push([{ text: "📅 Set Start Date", callback_data: `wf_prompt_date_${orderId}_${stageId}_start` }]);
+    buttons.push([{ text: "🏁 Set Completion Date", callback_data: `wf_prompt_date_${orderId}_${stageId}_end` }]);
+    buttons.push([{ text: "⏱ Set Budget Days", callback_data: `wf_prompt_budget_${orderId}_${stageId}` }]);
+  }
+
+  buttons.push([{ text: "🔄 Reset Stage", callback_data: `wf_reset_${orderId}_${stageId}` }]);
+  buttons.push([{ text: "⬅️ Back to Workflow Hub", callback_data: `wf_hub_${orderId}` }]);
   return { text, keyboard: { inline_keyboard: buttons } };
 }
 
@@ -660,6 +665,36 @@ export async function POST(request: Request) {
             await supabase.from('sample_orders').update({ production_workflow: stages }).eq('order_id', oId);
             const { text, keyboard } = await getWorkflowHub(supabase, oId);
             if (keyboard) await editTelegram(chatId, msgId, text, keyboard);
+        }
+      }
+      else if (data.startsWith("wf_start_")) {
+        const parts = data.split("_");
+        const sId = parts[parts.length - 1];
+        const oId = parts.slice(2, parts.length - 1).join("_");
+        const stageNum = parseInt(sId);
+        const { data: order } = await supabase.from('sample_orders').select('production_workflow').eq('order_id', oId).single();
+        if (order) {
+          const stages = order.production_workflow || {};
+          if (stageNum > 1) {
+            const prev = stages[stageNum - 1];
+            if (!prev || (prev.status !== 'completed' && prev.status !== 'na')) {
+              await editTelegram(chatId, msgId,
+                `⛔ <b>Cannot start ${STAGE_NAMES[stageNum]}</b>\n\n<b>${STAGE_NAMES[stageNum - 1]}</b> must be completed first.`,
+                { inline_keyboard: [[{ text: `⬅️ Back to Hub`, callback_data: `wf_hub_${oId}` }]] }
+              );
+              return NextResponse.json({ ok: true });
+            }
+          }
+          const now = new Date().toISOString();
+          stages[stageNum] = {
+            ...(stages[stageNum] || { assignedDays: 0 }),
+            status: 'in_progress',
+            startDate: stages[stageNum]?.startDate || now,
+          };
+          await supabase.from('sample_orders').update({ production_workflow: stages }).eq('order_id', oId);
+          await answerCallback(cb.id, `▶️ ${STAGE_NAMES[stageNum]} started!`);
+          const { text, keyboard } = await getStageDetail(supabase, oId, stageNum);
+          if (keyboard) await editTelegram(chatId, msgId, text, keyboard);
         }
       }
       // REPLACE WITH:
